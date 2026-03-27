@@ -1,4 +1,4 @@
-# federated-ueba: A Flower / PyTorch app
+# federated-ueba
 
 ## Prepare the data
 - Due to the way the feature extraction script works, a Linux environment is required.
