@@ -14,6 +14,9 @@ dataset/
 ExtractedData/
 joblib_cache/
 venv_wsl/
+model_pickle/
+scaler_data/
+communication_log.csv
 
 # Distribution / packaging
 .Python

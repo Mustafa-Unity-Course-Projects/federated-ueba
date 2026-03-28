@@ -1,5 +1,4 @@
 import os
-
 import torch
 import pandas as pd
 import numpy as np
@@ -7,11 +6,13 @@ import pickle
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score
 import federated_ueba.task as task
+from config_manager import config
 
 # --- CONFIGURATION ---
-FINAL_MODEL_PATH = "model_pickles/parameters_round_20.pkl"
-DATA_PATH = "cert_data.csv"
-SCALER_PATH = "scaler_data/scaler_client_0.pkl"
+FINAL_MODEL_PATH = os.path.join(config.get("federation", "save_path"), "parameters_round_20.pkl")
+DATA_PATH = config.get("data", "processed_data_path")
+SCALER_DIR = config.get("data", "scaler_dir")
+SCALER_FILENAME_TEMPLATE = config.get("data", "scaler_filename_template")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SCAN_STRIDE = 5  # Move the window 5 rows at a time to speed up the scan
 
@@ -19,92 +20,101 @@ SCAN_STRIDE = 5  # Move the window 5 rows at a time to speed up the scan
 def run_zscore_scan():
     print(f"🚀 Starting Full-Timeline Z-Score Scan on {DEVICE}...")
 
-    # 1. Load Scaler & Model
-    with open(SCALER_PATH, "rb") as f:
-        scaler = pickle.load(f)
-    expected_features = list(scaler.feature_names_in_)
+    # 1. Load and Prepare Data
+    print(f"📂 Loading data from {DATA_PATH}...")
+    if DATA_PATH.endswith(".pkl"):
+        df = pd.read_pickle(DATA_PATH)
+    else:
+        df = pd.read_csv(DATA_PATH, low_memory=False)
+    
+    # Handle missing 'day' column for weekly aggregated data
+    time_col = 'day' if 'day' in df.columns else ('week' if 'week' in df.columns else None)
+    sort_cols = ['user', time_col] if time_col else ['user']
+    df = df.sort_values(sort_cols)
+
+    num_clients = config.get("federation", "num_clients")
+    unique_users = sorted(df['user'].unique())
+    user_chunks = np.array_split(unique_users, num_clients)
+
+    # 2. Load Model & Setup Features
+    # Use the first client's scaler to determine expected features
+    first_scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=0))
+    if not os.path.exists(first_scaler_path):
+        raise FileNotFoundError(f"Scaler not found at {first_scaler_path}. Ensure training has run.")
+
+    with open(first_scaler_path, "rb") as f:
+        temp_scaler = pickle.load(f)
+    expected_features = list(temp_scaler.feature_names_in_)
 
     # Make sure to not feed the feature to the model.
     assert not ("insider" in expected_features or "insiders" in expected_features)
 
     model = task.LSTMAutoencoder(input_dim=len(expected_features), hidden_dim=128).to(DEVICE)
+    
+    if not os.path.exists(FINAL_MODEL_PATH):
+        print(f"⚠️ Warning: Model not found at {FINAL_MODEL_PATH}. Check your federation settings.")
+
     with open(FINAL_MODEL_PATH, "rb") as f:
         data = pickle.load(f)
         weights = data.get('global_parameters') or data.get('globa_parameters')
+        if weights is None:
+             raise ValueError("Could not find weights in model pickle.")
         model.load_state_dict({k: torch.tensor(v) for k, v in zip(model.state_dict().keys(), weights)})
     model.eval()
 
-    # 2. Load and Prepare Data
-    df = pd.read_csv(DATA_PATH, low_memory=False)
-    df = df.sort_values(['user', 'day'])
-
     # 3. Scanning Loop
     results = []
-    unique_users = df['user'].unique()
 
     with torch.no_grad():
-        for user in unique_users:
-            user_df = df[df['user'] == user]
-            u_features = user_df.reindex(columns=expected_features, fill_value=0)
-            u_features = u_features.apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
-            u_scaled = scaler.transform(u_features)
-            user_tensor = torch.tensor(u_scaled, dtype=torch.float32).to(DEVICE)
+        for client_id in range(num_clients):
+            scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=client_id))
+            print(f"🔍 Processing users for Client {client_id} (Scaler: {os.path.basename(scaler_path)})...")
+            
+            if not os.path.exists(scaler_path):
+                print(f"⚠️ Scaler {scaler_path} missing, skipping these users.")
+                continue
 
-            user_errors = []
-            if len(user_tensor) >= task.WINDOW_SIZE:
-                for i in range(0, len(user_tensor) - task.WINDOW_SIZE + 1, SCAN_STRIDE):
-                    window = user_tensor[i : i + task.WINDOW_SIZE].unsqueeze(0)
-                    reconstruction = model(window)
-                    error = torch.nn.functional.mse_loss(reconstruction, window).item()
-                    user_errors.append(error)
+            with open(scaler_path, "rb") as f:
+                scaler = pickle.load(f)
+            
+            client_users = user_chunks[client_id]
+            for user in client_users:
+                user_df = df[df['user'] == user]
+                u_features = user_df.reindex(columns=expected_features, fill_value=0)
+                u_features = u_features.apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
+                
+                # Scale data using the client-specific scaler
+                u_scaled = scaler.transform(u_features)
+                user_tensor = torch.tensor(u_scaled, dtype=torch.float32).to(DEVICE)
 
-            if user_errors:
-                user_errors = np.array(user_errors)
-                mean_err, std_err = np.mean(user_errors), np.std(user_errors)
-                std_err = 1e-6 if std_err == 0 else std_err # Prevent division by zero
-                max_z = (np.max(user_errors) - mean_err) / std_err
-                max_raw = np.max(user_errors)
-            else:
-                max_z, max_raw = 0.0, 0.0
+                user_errors = []
+                if len(user_tensor) >= task.WINDOW_SIZE:
+                    for i in range(0, len(user_tensor) - task.WINDOW_SIZE + 1, SCAN_STRIDE):
+                        window = user_tensor[i : i + task.WINDOW_SIZE].unsqueeze(0)
+                        reconstruction = model(window)
+                        error = torch.nn.functional.mse_loss(reconstruction, window).item()
+                        user_errors.append(error)
 
-            results.append({
-                "user": user,
-                "max_z_score": max_z,
-                "max_raw_error": max_raw,
-                "is_actual_insider": 1.0 if (user_df['insider'] == 1.0).any() else 0.0
-            })
+                if user_errors:
+                    user_errors = np.array(user_errors)
+                    mean_err, std_err = np.mean(user_errors), np.std(user_errors)
+                    std_err = 1e-6 if std_err == 0 else std_err # Prevent division by zero
+                    max_z = (np.max(user_errors) - mean_err) / std_err
+                    max_raw = np.max(user_errors)
+                else:
+                    max_z, max_raw = 0.0, 0.0
+
+                results.append({
+                    "user": user,
+                    "max_z_score": max_z,
+                    "max_raw_error": max_raw,
+                    "is_actual_insider": 1.0 if (user_df['insider'] == 1.0).any() else 0.0
+                })
 
     results_df = pd.DataFrame(results).sort_values(by="max_z_score", ascending=False)
     results_df.to_csv("federated_ueba_results.csv", index=False)
     print("💾 Results saved to federated_ueba_results.csv")
     return results_df
-
-"""
-def generate_report(df):
-    threshold = 3.5 # The Z-score cutoff for an alert
-    df['predicted'] = (df['max_z_score'] >= threshold).astype(float)
-
-    y_true, y_pred = df['is_actual_insider'], df['predicted']
-
-    print("\n" + "="*40)
-    print("       FINAL PERFORMANCE METRICS")
-    print("="*40)
-    print(f"Precision: {precision_score(y_true, y_pred):.4f}")
-    print(f"Recall:    {recall_score(y_true, y_pred):.4f}")
-    print(f"F1-Score:  {f1_score(y_true, y_pred):.4f}")
-    print("="*40)
-
-    # Visualization
-    plt.figure(figsize=(10, 6))
-    plt.hist(df[df['is_actual_insider']==0]['max_z_score'], bins=50, alpha=0.5, label='Normal', color='gray', log=True)
-    plt.hist(df[df['is_actual_insider']==1]['max_z_score'], bins=50, alpha=0.8, label='Insider', color='red', log=True)
-    plt.axvline(threshold, color='green', linestyle='--', label=f'Threshold ({threshold})')
-    plt.title('Insider Detection: Z-Score Distribution')
-    plt.xlabel('Z-Score (Standard Deviations)')
-    plt.ylabel('User Count (Log Scale)')
-    plt.legend()
-    plt.show()
-"""
 
 
 def generate_report(df, thresholds=[2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0], output_dir="evaluation_reports"):

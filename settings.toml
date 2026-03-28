@@ -1,0 +1,34 @@
+[project]
+name = "F-UEBA-Communication-Efficiency"
+version = "1.0.0"
+
+[data]
+dataset_path = "./dataset/r4.2"
+processed_data_path = "./ExtractedData/weekr4.2-percentile30.pkl"
+scaler_dir= "scaler_data"
+scaler_filename_template = "scaler_client_{i}.pkl"
+test_size = 0.2
+batch_size = 64
+is_non_iid = false           # Toggle for Stress Testing
+non_iid_alpha = 0.5          # Controls how "unbalanced" the data is
+
+[federation]
+num_clients = 2             # Use pyproect.toml -> tool.flwr.federations.local-simulation.options.num-supernodes
+num_rounds = 20
+local_epochs = 5
+fraction_fit = 1.0           # Participate rate (1.0 = all clients)
+save_path = "./model_pickle"
+
+[efficiency]
+# Options: "standard", "fp16_quant", "top_k_sparse"
+mode = "standard"
+top_k_ratio = 0.1            # Used if mode is "top_k_sparse"
+
+[model]
+learning_rate = 0.001
+window_size = 10
+stride = 1
+
+[evaluation]
+z_score_threshold = 3.5
+metrics = ["precision", "recall", "f1", "auc_roc", "comm_overhead"]

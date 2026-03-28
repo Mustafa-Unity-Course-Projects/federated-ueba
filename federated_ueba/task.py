@@ -7,10 +7,16 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 
-# Increased hidden_dim to 128 to handle the 500+ features of CERT 4.2
-WINDOW_SIZE = 10
-STRIDE = 5
+from config_manager import config
+
+LEARNING_RATE = config.get("model", "learning_rate")
+WINDOW_SIZE = config.get("model", "window_size")
+STRIDE = config.get("model", "stride")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# --- DATA CONFIGURATION ---
+SCALER_DIR = config.get("data", "scaler_dir")
+SCALER_FILENAME_TEMPLATE = config.get("data", "scaler_filename_template")
 
 class LSTMAutoencoder(nn.Module):
     def __init__(self, input_dim, hidden_dim=128):
@@ -27,11 +33,12 @@ class LSTMAutoencoder(nn.Module):
         return self.output_layer(x)
 
 def load_partitioned_data(input_path, partition_id, num_partitions):
-    df = pd.read_csv(input_path)
+    with open(input_path, "rb") as f:
+        df = pickle.load(f)
 
     # 1. DYNAMIC FEATURE SELECTION (Excluding the "Answers")
-    # We remove 'insider', 'label', and 'activity' to prevent data leakage
-    metadata = ['user', 'day', 'pc', 'activity', 'id', 'label', 'insider', 'to', 'from']
+    # We remove metadata and target columns to prevent data leakage
+    metadata = ['user', 'day', 'week', 'pc', 'activity', 'id', 'label', 'insider', 'to', 'from', 'starttime', 'endtime', 'pcid', 'time_stamp', 'actid']
     features = [c for c in df.columns if c not in metadata]
 
     # 2. Partitioning
@@ -41,22 +48,30 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
     client_df = df[df['user'].isin(my_users)].copy()
 
     # 3. Numeric Conversion & Cleanup
-    # Forcing all 500+ features to float32 and filling NaNs
     client_df[features] = client_df[features].apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
 
-    # 4. Scaling (Prevents the 10^15 loss explosion)
+    # 4. Scaling
     scaler = MinMaxScaler()
     if not client_df[features].empty:
         client_df[features] = scaler.fit_transform(client_df[features])
-        # Save scaler for later anomaly detection testing
-        scaler_path = f"./scaler_data/scaler_client_{partition_id}.pkl"
+        
+        # Ensure the directory exists
+        os.makedirs(SCALER_DIR, exist_ok=True)
+        
+        # Save scaler using configuration template
+        scaler_filename = SCALER_FILENAME_TEMPLATE.format(i=partition_id)
+        scaler_path = os.path.join(SCALER_DIR, scaler_filename)
+        
         with open(scaler_path, "wb") as f:
             pickle.dump(scaler, f)
         print(f"💾 Scaler saved: {scaler_path}")
 
     # 5. Sequence Building
     sequences = []
-    client_df = client_df.sort_values(['user', 'day'])
+    # Use 'day' if available, otherwise 'week', otherwise just 'user'
+    time_col = 'day' if 'day' in client_df.columns else ('week' if 'week' in client_df.columns else None)
+    sort_cols = ['user', time_col] if time_col else ['user']
+    client_df = client_df.sort_values(sort_cols)
 
     for _, group in client_df.groupby('user'):
         user_data = group[features].values
@@ -80,13 +95,12 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
 def train(net, trainloader, epochs):
     net.to(DEVICE)
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(net.parameters(), lr=LEARNING_RATE)
     net.train()
 
     for epoch in range(epochs):
         running_loss = 0.0
         for batch in trainloader:
-            # Batch shape is (Batch, Window, Features)
             batch = batch.to(DEVICE)
             optimizer.zero_grad()
             reconstruction = net(batch)
@@ -98,10 +112,6 @@ def train(net, trainloader, epochs):
 
 
 def test(net, testloader):
-    """
-    This is the function the error was complaining about.
-    It calculates the Reconstruction Error (MSE).
-    """
     net.to(DEVICE)
     criterion = nn.MSELoss()
     loss = 0.0
