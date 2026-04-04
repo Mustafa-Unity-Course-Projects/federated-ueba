@@ -17,7 +17,6 @@ Source File: weekr4.2-percentile30.pkl
 Feature Count: Dynamic (Detected by Scaler).
 Loading Method: Binary stream via pickle.load().
 Data Partitioning: Dynamic (np.array_split based on num_clients).
-Scaling Strategy: Individual MinMaxScaler per Client Partition.
 Scaler Storage: ./scaler_data/scaler_client_{i}.pkl
 Logic: Local scaling handles Non-IID behavioral baselines and prevents global data leakage.
 

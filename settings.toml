@@ -4,31 +4,44 @@ version = "1.0.0"
 
 [data]
 dataset_path = "./dataset/r4.2"
-processed_data_path = "./ExtractedData/weekr4.2-percentile30.pkl"
+processed_data_path = "./ExtractedData/dayr4.2-percentile30.csv"
 scaler_dir= "scaler_data"
 scaler_filename_template = "scaler_client_{i}.pkl"
 test_size = 0.2
 batch_size = 64
-is_non_iid = false           # Toggle for Stress Testing
-non_iid_alpha = 0.5          # Controls how "unbalanced" the data is
+is_non_iid = false
+non_iid_alpha = 0.5
+selected_features = [
+    "isweekday", "isweekend", "n_workhourallact", "n_afterhourallact",
+    "n_logon", "n_workhourlogon", "n_afterhourlogon", "logon_n-pc0", "logon_n-pc1", "logon_n-pc2",
+    "n_usb", "usb_mean_usb_dur", "usb_n-pc0", "usb_n-pc1", "usb_n-pc2", "n_workhourusb", "n_afterhourusb",
+    "n_file", "file_mean_file_len", "file_mean_file_depth", "file_mean_file_nwords", "file_n-disk0", "file_n-disk1",
+    "file_n_otherf", "file_n_compf", "file_n_phof", "file_n_docf", "file_n_txtf", "file_n_exef",
+    "n_email", "email_mean_n_des", "email_mean_n_atts", "email_n-Xemail1", "email_mean_n_exdes",
+    "email_mean_n_bccdes", "email_n-exbccmail1", "email_mean_email_size", "email_mean_email_text_slen",
+    "email_mean_email_text_nwords", "email_n-pc0", "email_n-pc1", "email_n-pc2",
+    "n_http", "http_mean_url_len", "http_mean_url_depth", "http_mean_http_c_len", "http_mean_http_c_nwords",
+    "http_n_socnetf", "http_n_cloudf", "http_n_jobf"
+]
 
 [federation]
-num_clients = 2             # Use pyproect.toml -> tool.flwr.federations.local-simulation.options.num-supernodes
 num_rounds = 20
-local_epochs = 5
-fraction_fit = 1.0           # Participate rate (1.0 = all clients)
+local_epochs = 10
+fraction_fit = 1.0
+min_fit_clients = 2
+min_available_clients = 2
 save_path = "./model_pickle"
 
 [efficiency]
-# Options: "standard", "fp16_quant", "top_k_sparse"
 mode = "standard"
-top_k_ratio = 0.1            # Used if mode is "top_k_sparse"
+top_k_ratio = 0.1
 
 [model]
-learning_rate = 0.001
-window_size = 10
+learning_rate = 0.0005
+window_size = 14
 stride = 1
+hidden_dim = 64
 
 [evaluation]
-z_score_threshold = 3.5
+z_score_threshold = 6.0
 metrics = ["precision", "recall", "f1", "auc_roc", "comm_overhead"]

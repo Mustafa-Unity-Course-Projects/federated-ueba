@@ -129,7 +129,9 @@ def combine_by_timerange_pandas(dname='r4.2'):
                                                                          'activity', 'to', 'from', 'content']
 
             df = add_action_thisweek(act, columns, lines, act_handles, week_index, stop, firstdate, dname=dname)
-            thisweekdf = pd.concat([thisweekdf, df], sort=False, ignore_index=True)
+            # DIFFERENCE FOUND: The current version used ignore_index=True, which destroyed the 
+            # unique action IDs needed for malicious activity matching in Step 3.
+            thisweekdf = pd.concat([thisweekdf, df], sort=False, ignore_index=False)
 
         thisweekdf['date'] = thisweekdf['date'].apply(lambda x: datetime.strptime(x, "%m/%d/%Y %H:%M:%S"))
         thisweekdf.to_pickle("DataByWeek/" + str(week_index) + ".pickle")
@@ -220,20 +222,32 @@ def getuserlist(dname='r4.2', psycho=True):
     return df
 
 
-@memory.cache
+# DIFFERENCE FOUND: Caching this function can be problematic if it runs once before the 
+# answers are downloaded. Removed @memory.cache.
 def get_mal_userdata(data='r4.2', usersdf=None):
-    if not os.path.isdir('answers'):
+    # Fixed resolution: Since we os.chdir(DATA_PATH) in main, 
+    # we should check for answers in both the current and parent directory.
+    if not os.path.isdir('answers') and not os.path.isdir('../answers'):
         os.system('wget https://kilthub.cmu.edu/ndownloader/files/24857828 -O answers.tar.bz2')
         os.system('tar -xjvf answers.tar.bz2')
 
-    listmaluser = pd.read_csv("answers/insiders.csv")
+    # Path adjustment for insiders.csv
+    ans_path = 'answers/insiders.csv' if os.path.isdir('answers') else '../answers/insiders.csv'
+    listmaluser = pd.read_csv(ans_path)
+    
     listmaluser['dataset'] = listmaluser['dataset'].apply(lambda x: str(x))
     listmaluser = listmaluser[listmaluser['dataset'] == data.replace("r", "")]
     # for r6.2, new time in scenario 4 answer is incomplete.
     if data == 'r6.2': listmaluser.at[listmaluser['scenario'] == 4, 'start'] = '02' + listmaluser[
         listmaluser['scenario'] == 4]['start']
-    listmaluser[['start', 'end']] = listmaluser[['start', 'end']].map(
-        lambda x: datetime.strptime(x, "%m/%d/%Y %H:%M:%S"))
+    
+    # Updated to handle newer pandas versions (map vs applymap)
+    try:
+        listmaluser[['start', 'end']] = listmaluser[['start', 'end']].applymap(
+            lambda x: datetime.strptime(x, "%m/%d/%Y %H:%M:%S"))
+    except:
+         listmaluser[['start', 'end']] = listmaluser[['start', 'end']].apply(
+            lambda x: pd.to_datetime(x, format="%m/%d/%Y %H:%M:%S"))
 
     if type(usersdf) != pd.core.frame.DataFrame:
         usersdf = getuserlist(data)
@@ -247,12 +261,14 @@ def get_mal_userdata(data='r4.2', usersdf=None):
         usersdf.loc[listmaluser['user'][i], 'mend'] = listmaluser['end'][i]
         usersdf.loc[listmaluser['user'][i], 'malscene'] = listmaluser['scenario'][i]
 
+        detail_dir = 'answers' if os.path.isdir('answers') else '../answers'
         if data in ['r4.2', 'r5.2']:
-            malacts = open(f"answers/r{listmaluser['dataset'][i]}-{listmaluser['scenario'][i]}/" +
-                           listmaluser['details'][i], 'r').read().strip().split("\n")
+            mal_path = f"{detail_dir}/r{listmaluser['dataset'][i]}-{listmaluser['scenario'][i]}/" + \
+                           listmaluser['details'][i]
         else:  # only 1 malicious user, no folder
-            malacts = open("answers/" + listmaluser['details'][i], 'r').read().strip().split("\n")
+            mal_path = f"{detail_dir}/" + listmaluser['details'][i]
 
+        malacts = open(mal_path, 'r').read().strip().split("\n")
         malacts = [x.split(',') for x in malacts]
 
         mal_users = np.array([x[3].strip('"') for x in malacts])
@@ -531,6 +547,7 @@ def process_week_num(week, users, userlist='all', data='r4.2'):
                     device_f = [connect_dur]
 
             is_mal_act = 0
+            # FIX: matches index (action id) against malacts.
             if mal_u > 0 and df_acts_u.index[i] in users.loc[u]['malacts']: is_mal_act = 1
 
             oneu_week[i, :] = [user_dict[u], time_convert(df_acts_u.iloc[i]['date'], 'dt2dn'), list_uacts_num[i], pc,
@@ -951,7 +968,9 @@ def to_csv(week, mode, data, ul, uf_dict, list_uf, subsession_mode={}):
                 is_ITAdmin = 1 if ul.loc[user_dict[v], 'role'] == 'ITAdmin' else 0
                 row = [week] + proc_u_features(ul.loc[user_dict[v]], uf_dict, list_uf, data=data) + [is_ITAdmin] + \
                       (ul.loc[user_dict[v], ['O', 'C', 'E', 'A', 'N']]).tolist() + [0]
-                row[-1] = int(list(set(w[w['user'] == v]['insider']))[0])
+                # FIX: improved fragile label logic to ensure scenario ID is picked
+                labels = set(w[w['user'] == v]['insider'])
+                row[-1] = int(max(labels)) if labels else 0
                 uwdict[v] = row
         uw = pd.DataFrame.from_dict(uwdict, orient='index', columns=cols)
 
@@ -1059,6 +1078,7 @@ def to_csv(week, mode, data, ul, uf_dict, list_uf, subsession_mode={}):
 
 if __name__ == "__main__":
     original_dir = os.getcwd()
+    # OS.CHDIR() DIFFERENCE: Running from root or subfolder resolution.
     os.chdir(DATA_PATH)
 
     dname = os.path.basename(os.path.normpath(DATA_PATH))

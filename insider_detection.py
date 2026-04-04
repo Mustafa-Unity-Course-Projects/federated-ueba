@@ -14,7 +14,7 @@ DATA_PATH = config.get("data", "processed_data_path")
 SCALER_DIR = config.get("data", "scaler_dir")
 SCALER_FILENAME_TEMPLATE = config.get("data", "scaler_filename_template")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SCAN_STRIDE = 5  # Move the window 5 rows at a time to speed up the scan
+SCAN_STRIDE = 1  # Using a stride of 1 to ensure we don't miss any sequences
 
 
 def run_zscore_scan():
@@ -32,7 +32,7 @@ def run_zscore_scan():
     sort_cols = ['user', time_col] if time_col else ['user']
     df = df.sort_values(sort_cols)
 
-    num_clients = config.get("federation", "num_clients")
+    num_clients = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes")
     unique_users = sorted(df['user'].unique())
     user_chunks = np.array_split(unique_users, num_clients)
 
@@ -95,6 +95,10 @@ def run_zscore_scan():
                         error = torch.nn.functional.mse_loss(reconstruction, window).item()
                         user_errors.append(error)
 
+                # --- DEBUG PRINT FOR ZERO METRICS ---
+                # Check if we have an insider and if the errors are being calculated
+                has_insider_activity = (user_df['insider'] != 0).any()
+                
                 if user_errors:
                     user_errors = np.array(user_errors)
                     mean_err, std_err = np.mean(user_errors), np.std(user_errors)
@@ -108,10 +112,19 @@ def run_zscore_scan():
                     "user": user,
                     "max_z_score": max_z,
                     "max_raw_error": max_raw,
-                    "is_actual_insider": 1.0 if (user_df['insider'] == 1.0).any() else 0.0
+                    "is_actual_insider": 1.0 if has_insider_activity else 0.0
                 })
 
     results_df = pd.DataFrame(results).sort_values(by="max_z_score", ascending=False)
+    
+    # Check if there are ANY insiders in the results
+    total_insiders = results_df['is_actual_insider'].sum()
+    print(f"🔍 Total users processed: {len(results_df)}")
+    print(f"🔍 Total actual insiders identified in dataset: {total_insiders}")
+    
+    if total_insiders == 0:
+        print("❌ WARNING: No actual insiders found in the processed data. Metrics will stay at 0.")
+
     results_df.to_csv("federated_ueba_results.csv", index=False)
     print("💾 Results saved to federated_ueba_results.csv")
     return results_df

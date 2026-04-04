@@ -6,8 +6,8 @@ from federated_ueba.strategy import FedAvgWithModelSaving
 
 NUM_ROUNDS = config.get("federation", "num_rounds")
 FRACTION_FIT = config.get("federation", "fraction_fit")
-MIN_FIT_CLIENTS = config.get("federation", "num_clients")
-MIN_AVAILABLE_CLIENTS = config.get("federation", "num_clients")
+MIN_FIT_CLIENTS = config.get("federation", "min_fit_clients") or 2
+MIN_AVAILABLE_CLIENTS = config.get("federation", "min_available_clients") or 2
 SAVE_PATH = config.get("federation", "save_path")
 
 

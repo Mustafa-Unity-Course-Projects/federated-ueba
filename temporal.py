@@ -151,7 +151,7 @@ if __name__ == "__main__":
                         help='Data representation to extract (concat, percentile, meandiff, mediandiff). Default: percentile',
                         type=str, default='percentile')
     parser.add_argument('--file_input', help='CERT input file name. Default: week-r5.2.csv.gz', type=str,
-                        default='ExtractedData/weekr4.2.csv')
+                        default='ExtractedData/dayr4.2.csv')
     parser.add_argument('--window_size',
                         help='Window size for percentile or mean/median difference representation. Default: 30',
                         type=int, default=30)
@@ -177,7 +177,11 @@ if __name__ == "__main__":
         if rep in ['percentile', 'meandiff', 'meddiff']:
             s1 = subtract_percentile_combination(s, data_type, calc_type=rep, window_size=args.window_size,
                                                  dname='cert')
-            s1.to_pickle(f'{fileName}-{rep}{args.window_size}.pkl')
+            output_name = f'{fileName}-{rep}{args.window_size}.csv'
+            s1.to_csv(output_name, index=False)
+            print(f"💾 Saved as CSV: {output_name}")
         else:
             s1 = concat_combination(s, window_size=args.num_concat, dname='cert')
-            s1.to_pickle(f'{fileName}-{rep}{args.num_concat}.pkl')
+            output_name = f'{fileName}-{rep}{args.num_concat}.csv'
+            s1.to_csv(output_name, index=False)
+            print(f"💾 Saved as CSV: {output_name}")
