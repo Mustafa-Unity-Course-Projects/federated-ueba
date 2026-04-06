@@ -7,15 +7,21 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from config_manager import config
 
-LEARNING_RATE = config.get("model", "learning_rate")
-WINDOW_SIZE = config.get("model", "window_size")
-STRIDE = config.get("model", "stride")
+# --- CONFIGURATION FROM CENTRALIZED ---
+LEARNING_RATE = config.get("model", "learning_rate") or 0.001
+WINDOW_SIZE = config.get("model", "window_size") or 14
+STRIDE = config.get("model", "stride") or 1
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+BATCH_SIZE = config.get("data", "batch_size") or 64
+SELECTED_FEATURES = config.get("data", "selected_features") or None
+HIDDEN_DIM = config.get("model", "hidden_dim") or 64
 
 # --- DATA CONFIGURATION ---
 SCALER_DIR = config.get("data", "scaler_dir")
 SCALER_FILENAME_TEMPLATE = config.get("data", "scaler_filename_template")
-SELECTED_FEATURES = config.get("data", "selected_features") or None
+
+# Global cache to avoid redundant CSV reads
+_cached_df = None
 
 class LSTMAutoencoder(nn.Module):
     def __init__(self, input_dim, hidden_dim=64):
@@ -38,45 +44,55 @@ class LSTMAutoencoder(nn.Module):
 
     def forward(self, x):
         if self.training:
+            # Training noise to improve robustness
             x = x + torch.randn_like(x) * 0.01
 
-        # Encoder outputs (B, T, hidden_dim) because it's bidirectional (hidden_dim//2 * 2)
+        # Encoder outputs (B, T, hidden_dim)
         _, (hidden, _) = self.encoder(x)
         
         # Concat last layers of forward and backward passes
-        # hidden shape: (num_layers * num_directions, batch, hidden_size)
         latent = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim=1)
-        
-        # Pass through bottleneck
         latent = self.bottleneck(latent)
         
         # Prepare for decoder
         decoded_init = latent.unsqueeze(1).repeat(1, WINDOW_SIZE, 1)
-        
         x, _ = self.decoder(decoded_init)
         return self.output_layer(x)
 
 def load_partitioned_data(input_path, partition_id, num_partitions):
-    df = pd.read_csv(input_path)
+    global _cached_df
+    if _cached_df is None:
+        _cached_df = pd.read_csv(input_path)
+    
+    df = _cached_df
     metadata = ['user', 'day', 'week', 'pc', 'activity', 'id', 'label', 'insider', 'to', 'from', 'starttime', 'endtime', 'pcid', 'time_stamp', 'actid']
     features = [c for c in SELECTED_FEATURES if c in df.columns] if SELECTED_FEATURES else [c for c in df.columns if c not in metadata]
 
-    if 'insider' in df.columns:
-        df = df[df['insider'] == 0].copy()
-
-    unique_users = sorted(df['user'].unique())
-    user_chunks = np.array_split(unique_users, num_partitions)
+    # Partition based on ALL users to keep indexing consistent
+    all_users = sorted(df['user'].unique())
+    user_chunks = np.array_split(all_users, num_partitions)
     my_users = user_chunks[partition_id]
-    client_df = df[df['user'].isin(my_users)].copy()
+    
+    client_full_df = df[df['user'].isin(my_users)].copy()
 
+    # For training, only use normal activity
+    client_df = client_full_df[client_full_df['insider'] == 0].copy() if 'insider' in client_full_df.columns else client_full_df.copy()
+
+    if client_df.empty:
+        return None, len(features)
+
+    # Pre-processing from Centralized: Numeric conversion, log1p, and Scaling
     client_df[features] = client_df[features].apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
     client_df[features] = np.log1p(client_df[features].clip(lower=0))
+    
     scaler = StandardScaler()
-    if not client_df[features].empty:
-        client_df[features] = scaler.fit_transform(client_df[features])
-        os.makedirs(SCALER_DIR, exist_ok=True)
-        with open(os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=partition_id)), "wb") as f:
-            pickle.dump(scaler, f)
+    client_df[features] = scaler.fit_transform(client_df[features])
+    
+    # Save the scaler fitted on NORMAL data for inference
+    os.makedirs(SCALER_DIR, exist_ok=True)
+    scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=partition_id))
+    with open(scaler_path, "wb") as f:
+        pickle.dump(scaler, f)
 
     sequences = []
     for _, group in client_df.groupby('user'):
@@ -86,19 +102,24 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
                 sequences.append(user_data[i:i + WINDOW_SIZE])
 
     if not sequences: return None, len(features)
-    return torch.utils.data.DataLoader(torch.tensor(np.array(sequences), dtype=torch.float32), batch_size=32, shuffle=True), len(features)
+    return torch.utils.data.DataLoader(torch.tensor(np.array(sequences), dtype=torch.float32), 
+                                       batch_size=BATCH_SIZE, shuffle=True, pin_memory=True), len(features)
 
 def train(net, trainloader, epochs):
     net.to(DEVICE)
     criterion = nn.MSELoss()
+    # Optimizer settings from Centralized: weight_decay and Adam
     optimizer = torch.optim.Adam(net.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
     net.train()
     for _ in range(epochs):
         for batch in trainloader:
             batch = batch.to(DEVICE)
             optimizer.zero_grad()
-            loss = criterion(net(batch), batch)
+            output = net(batch)
+            loss = criterion(output, batch)
             loss.backward()
+            # Gradient clipping from Centralized
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
             optimizer.step()
 
 def test(net, testloader):

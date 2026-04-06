@@ -12,7 +12,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.criterion = torch.nn.MSELoss()
 
     def get_parameters(self, config):
-        # 1. Get parameters as NumPy arrays (using detach() to handle tensors with grad)
+        # 1. Get parameters as NumPy arrays
         params = [val.detach().cpu().numpy() for val in self.model.parameters()]
 
         # 2. Calculate Size (The "Communication Cost" Metric)
@@ -31,15 +31,14 @@ class FlowerClient(fl.client.NumPyClient):
         state_dict = OrderedDict({k: torch.tensor(v).to(task.DEVICE) for k, v in params_dict})
         self.model.load_state_dict(state_dict, strict=True)
 
-    def fit(self, parameters, config):
+    def fit(self, parameters, config_dict):
         self.set_parameters(parameters)
-        # task.train already handles moving batches to task.DEVICE
-        task.train(self.model, self.trainloader, epochs=3)
+        local_epochs = config.get("federation", "local_epochs") or 3
+        task.train(self.model, self.trainloader, epochs=local_epochs)
         return self.get_parameters(config={}), len(self.trainloader), {}
 
-    def evaluate(self, parameters, config):
+    def evaluate(self, parameters, config_dict):
         self.set_parameters(parameters)
-        # task.test already handles moving batches to task.DEVICE
         loss = task.test(self.model, self.trainloader)
         return float(loss), len(self.trainloader), {"mse": float(loss)}
 
@@ -54,8 +53,9 @@ def client_fn(context):
         num_partitions
     )
 
-    # Initialize model and move it to the configured device immediately
-    model = task.LSTMAutoencoder(input_dim=detected_dim, hidden_dim=128).to(task.DEVICE)
+    # Use hidden_dim from config to match centralized training
+    hidden_dim = config.get("model", "hidden_dim") or 64
+    model = task.LSTMAutoencoder(input_dim=detected_dim, hidden_dim=hidden_dim).to(task.DEVICE)
 
     return FlowerClient(trainloader, model).to_client()
 
