@@ -1,12 +1,15 @@
 from collections import OrderedDict
 import flwr as fl
 import torch
+import pickle
+import os
 
 from config_manager import config
 from federated_ueba import task
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self, trainloader, model):
+    def __init__(self, partition_id, trainloader, model):
+        self.partition_id = partition_id
         self.trainloader = trainloader
         self.model = model.to(task.DEVICE)
         self.criterion = torch.nn.MSELoss()
@@ -35,6 +38,18 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
         local_epochs = config.get("federation", "local_epochs") or 3
         task.train(self.model, self.trainloader, epochs=local_epochs)
+        
+        # --- LOCAL CALIBRATION (NEW) ---
+        # Each client saves its own error stats based on the latest global weights
+        # this significantly improves Z-score precision.
+        mean_err, std_err = task.get_error_distribution(self.model, self.trainloader)
+        stats = {"mean_per_feature": mean_err, "std_per_feature": std_err}
+        
+        scaler_dir = config.get("data", "scaler_dir")
+        stats_path = os.path.join(scaler_dir, f"error_stats_client_{self.partition_id}.pkl")
+        with open(stats_path, "wb") as f:
+            pickle.dump(stats, f)
+            
         return self.get_parameters(config={}), len(self.trainloader), {}
 
     def evaluate(self, parameters, config_dict):
@@ -57,6 +72,6 @@ def client_fn(context):
     hidden_dim = config.get("model", "hidden_dim") or 64
     model = task.LSTMAutoencoder(input_dim=detected_dim, hidden_dim=hidden_dim).to(task.DEVICE)
 
-    return FlowerClient(trainloader, model).to_client()
+    return FlowerClient(partition_id, trainloader, model).to_client()
 
 app = fl.client.ClientApp(client_fn=client_fn)
