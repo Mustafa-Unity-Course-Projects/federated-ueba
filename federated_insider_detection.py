@@ -10,6 +10,7 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
                              accuracy_score, balanced_accuracy_score, confusion_matrix)
 import federated_ueba.task as task
 from config_manager import config
+import argparse # Import argparse
 
 # --- CONFIGURATION ---
 SAVE_PATH = config.get("federation", "save_path")
@@ -17,8 +18,11 @@ DATA_PATH = config.get("data", "processed_data_path")
 SCALER_DIR = config.get("data", "scaler_dir")
 SCALER_FILENAME_TEMPLATE = config.get("data", "scaler_filename_template")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-REPORT_DIR = "federated_evaluation_reports"
-ROUND_RESULTS_DIR = os.path.join(REPORT_DIR, "round_by_round_results")
+
+# These will be set dynamically based on run_id
+BASE_REPORT_DIR = "federated_evaluation_reports"
+REPORT_DIR = "" 
+ROUND_RESULTS_DIR = ""
 
 HIDDEN_DIM = config.get("model", "hidden_dim") or 128
 TOP_K_FEATURES = 5
@@ -26,14 +30,20 @@ PERSISTENCE_WINDOW = 3
 DIVERSITY_THRESHOLD = 2.0 
 SCAN_STRIDE = 1
 
-def cleanup_old_metrics():
-    """Removes previous evaluation metrics and reports."""
-    print(f"🧹 Cleaning up old metrics in {REPORT_DIR}...")
+def cleanup_old_metrics(run_id):
+    """Removes previous evaluation metrics and reports for a specific run_id."""
+    global REPORT_DIR, ROUND_RESULTS_DIR
+    REPORT_DIR = os.path.join(BASE_REPORT_DIR, run_id)
+    ROUND_RESULTS_DIR = os.path.join(REPORT_DIR, "round_by_round_results")
+
+    print(f"🧹 Cleaning up old metrics for run '{run_id}' in {REPORT_DIR}...")
     if os.path.exists(REPORT_DIR):
         shutil.rmtree(REPORT_DIR)
     os.makedirs(ROUND_RESULTS_DIR, exist_ok=True)
-    if os.path.exists("federated_insider_results_advanced.csv"):
-        os.remove("federated_insider_results_advanced.csv")
+    
+    # The advanced results CSV is specific to a run, so it should be in its folder
+    if os.path.exists(f"federated_insider_results_advanced_{run_id}.csv"):
+        os.remove(f"federated_insider_results_advanced_{run_id}.csv")
 
 def perform_scan(model, df, user_chunks, expected_features, num_clients):
     results = []
@@ -93,9 +103,10 @@ def calculate_metrics_at_threshold(y_true, y_scores, threshold):
         "tp": tp, "fp": fp, "tn": tn, "fn": fn
     }
 
-def run_federated_search():
-    cleanup_old_metrics()
-    print(f"🚀 Starting Multi-Round Model Search (every 10th round)...")
+def run_federated_search(run_id):
+    cleanup_old_metrics(run_id) # Clean up specific run's metrics
+    print(f"🚀 Starting Multi-Round Model Search for run '{run_id}' (every 10th round)...")
+    
     df = pd.read_csv(DATA_PATH, low_memory=False)
     df = df.sort_values(['user', 'day' if 'day' in df.columns else 'week'])
     num_clients = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
@@ -116,6 +127,17 @@ def run_federated_search():
     
     summary_data = []
     best_pr_auc, best_round, best_results = 0, -1, None
+
+    # Load communication log
+    comm_log_path = "communication_log.csv"
+    if os.path.exists(comm_log_path):
+        comm_df = pd.read_csv(comm_log_path, header=None, names=['type', 'size_mb'])
+        avg_comm_per_round = comm_df['size_mb'].mean() # Simple average for now
+        print(f"📊 Average communication per round: {avg_comm_per_round:.4f} MB")
+    else:
+        avg_comm_per_round = 0.0
+        print("⚠️ communication_log.csv not found. Communication metrics will be 0.")
+
 
     for r_num, r_path in candidates:
         print(f"🔄 Evaluating Round {r_num}...")
@@ -151,13 +173,32 @@ def run_federated_search():
         if pr_auc_val > best_pr_auc:
             best_pr_auc, best_round, best_results = pr_auc_val, r_num, current_results
 
-    if best_results is None: return None, -1, 0, pd.DataFrame()
+    if best_results is None: 
+        print("❌ No models were evaluated. Ensure training was completed and model_pickle exists.")
+        return None, -1, 0, pd.DataFrame(), avg_comm_per_round
+    
     summary_df = pd.DataFrame(summary_data)
     summary_df.to_csv(os.path.join(REPORT_DIR, "federated_rounds_comparison.csv"), index=False)
-    best_results.to_csv("federated_insider_results_advanced.csv", index=False)
-    return best_results, best_round, best_pr_auc, summary_df
+    best_results.to_csv(os.path.join(REPORT_DIR, f"federated_insider_results_advanced_{run_id}.csv"), index=False)
+    
+    # Save to overall comparison file
+    overall_comparison_path = os.path.join(BASE_REPORT_DIR, "overall_efficiency_comparison.csv")
+    best_row = summary_df[summary_df['Round']==best_round].iloc[0].to_dict()
+    
+    # Add run_id and communication to the best_row
+    best_row['Run_ID'] = run_id
+    best_row['Avg_Comm_MB_per_Round'] = avg_comm_per_round
+    
+    # Convert to DataFrame and append
+    overall_df = pd.DataFrame([best_row])
+    if os.path.exists(overall_comparison_path):
+        overall_df.to_csv(overall_comparison_path, mode='a', header=False, index=False)
+    else:
+        overall_df.to_csv(overall_comparison_path, mode='w', header=True, index=False)
 
-def generate_report(df, best_round, pr_auc_val, summary_df):
+    return best_results, best_round, best_pr_auc, summary_df, avg_comm_per_round
+
+def generate_report(df, best_round, pr_auc_val, summary_df, avg_comm_per_round, run_id):
     if df is None or summary_df.empty: return
     print("\n📊 Generating Enhanced Reports...")
     
@@ -166,12 +207,13 @@ def generate_report(df, best_round, pr_auc_val, summary_df):
     plt.plot(summary_df['Round'], summary_df['PR-AUC'], marker='o', label='PR-AUC (Quality)', color='blue')
     plt.plot(summary_df['Round'], summary_df['Balanced_Accuracy'], marker='^', label='Balanced Accuracy', color='purple')
     plt.plot(summary_df['Round'], summary_df['Max-F1'], marker='s', label='Max F1-Score', color='green')
-    plt.title('Honest Federated Learning Progress (Accounting for Imbalance)')
+    plt.title(f'Honest FL Progress for Run: {run_id}')
     plt.xlabel('Round Number')
     plt.ylabel('Score')
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.savefig(os.path.join(REPORT_DIR, 'honest_learning_progress.png'))
+    plt.close() # Close plot to free memory
 
     # Plot 2: Z-Score Cutoff
     y_true, y_scores = df['is_actual_insider'], df['max_z_score']
@@ -187,32 +229,35 @@ def generate_report(df, best_round, pr_auc_val, summary_df):
     plt.plot(thresholds, rec_sweep, label='Recall (Detection Rate)')
     plt.plot(thresholds, bacc_sweep, label='Balanced Accuracy')
     plt.axvline(x=summary_df[summary_df['Round']==best_round]['Optimal-Threshold'].values[0], color='black', linestyle='--', label='Optimal Threshold')
-    plt.title(f'Threshold Sensitivity Analysis (Round {best_round})')
+    plt.title(f'Threshold Sensitivity Analysis for Run: {run_id}')
     plt.xlabel('Detection Threshold (Z-Score)')
     plt.ylabel('Score')
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.savefig(os.path.join(REPORT_DIR, 'zscore_cutoff_analysis.png'))
+    plt.close()
 
     # Plot 3: Distribution
     plt.figure(figsize=(10, 6))
     plt.hist(df[df['is_actual_insider'] == 0]['max_z_score'], bins=100, alpha=0.5, label='Normal', color='gray', log=True)
     plt.hist(df[df['is_actual_insider'] == 1]['max_z_score'], bins=100, alpha=0.8, label='Insider', color='red', log=True)
-    plt.title(f'Detection Score Distribution (Log Scale) | Round {best_round}')
+    plt.title(f'Detection Score Distribution (Log Scale) for Run: {run_id}')
     plt.xlabel('Z-Score')
     plt.ylabel('User Count')
     plt.legend()
     plt.savefig(os.path.join(REPORT_DIR, 'score_distribution.png'))
+    plt.close()
     
     best_row = summary_df[summary_df['Round']==best_round].iloc[0]
     print("\n" + "=" * 55)
-    print(f"       FEDERATED EVALUATION (IMBALANCE AWARE)")
+    print(f"       FEDERATED EVALUATION (IMBALANCE AWARE) FOR RUN: {run_id}")
     print("=" * 55)
     print(f"Winner Round:             {best_round}")
     print(f"PR-AUC (Avg Precision):   {pr_auc_val:.4f}")
     print(f"Max F1-Score:             {best_row['Max-F1']:.4f}")
     print(f"Balanced Accuracy:        {best_row['Balanced_Accuracy']:.4f}")
     print(f"Standard Accuracy:        {best_row['Accuracy']:.4f} (Caution: Misleading)")
+    print(f"Avg Comm. per Round:      {avg_comm_per_round:.4f} MB")
     print("-" * 55)
     print(f"Detection Performance at Optimal Threshold:")
     print(f"  True Positives (Insiders Caught): {int(best_row['TP'])}")
@@ -222,5 +267,10 @@ def generate_report(df, best_round, pr_auc_val, summary_df):
     print("=" * 55)
 
 if __name__ == "__main__":
-    results, r_num, pr_auc, summary = run_federated_search()
-    generate_report(results, r_num, pr_auc, summary)
+    parser = argparse.ArgumentParser(description="Evaluate federated model performance and communication efficiency.")
+    parser.add_argument("--run_id", type=str, required=True,
+                        help="Unique identifier for this evaluation run (e.g., 'no_plugins', 'topk_quant').")
+    args = parser.parse_args()
+
+    results, r_num, pr_auc, summary, avg_comm = run_federated_search(args.run_id)
+    generate_report(results, r_num, pr_auc, summary, avg_comm, args.run_id)

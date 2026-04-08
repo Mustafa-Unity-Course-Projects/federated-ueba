@@ -1,3 +1,4 @@
+import os
 import tomllib
 from pathlib import Path
 from threading import Lock
@@ -21,6 +22,9 @@ class _ConfigManager:
         
         # Load pyproject.toml
         self._pyproject = self._load_toml(current_dir, "pyproject.toml")
+        
+        # Get run_id from environment or default
+        self._run_id = os.environ.get("RUN_ID", "default_run")
 
     def _load_toml(self, directory, filename):
         path = directory / filename
@@ -30,23 +34,22 @@ class _ConfigManager:
         if path.exists():
             with open(path, "rb") as f:
                 data = tomllib.load(f)
-                print(f"--- Config Successfully Loaded from {path} ---")
                 return data
         else:
-            print(f"--- Warning: {filename} not found ---")
             return {}
 
     def get(self, *keys, default=None):
-        """
-        Access config data safely from settings.toml: 
-        config.get('model', 'lr')
-        Or multiple keys for nested access:
-        config.get('tool', 'flwr', 'federations', 'local-simulation', 'options', 'num-supernodes')
-        """
-        return self._get_from_dict(self._settings, keys, default)
+        val = self._get_from_dict(self._settings, keys, default)
+        
+        # Automatically inject run_id into paths
+        if isinstance(val, str) and ("model_pickle" in val or "scaler_data" in val or "evaluation_reports" in val):
+            if "{run_id}" in val:
+                return val.format(run_id=self._run_id)
+            # If not formatted but matches, append it
+            return os.path.join(val, self._run_id)
+        return val
 
     def get_pyproject(self, *keys, default=None):
-        """Access config data safely from pyproject.toml"""
         return self._get_from_dict(self._pyproject, keys, default)
 
     def _get_from_dict(self, data, keys, default):
@@ -59,11 +62,7 @@ class _ConfigManager:
         return curr
 
     @property
-    def settings(self):
-        return self._settings
-
-    @property
-    def pyproject(self):
-        return self._pyproject
+    def run_id(self):
+        return self._run_id
 
 config = _ConfigManager()
