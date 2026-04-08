@@ -8,24 +8,19 @@ from config_manager import config
 from federated_ueba import task
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self, partition_id, trainloader, model):
+    def __init__(self, partition_id, trainloader, valloader, model):
         self.partition_id = partition_id
         self.trainloader = trainloader
+        self.valloader = valloader
         self.model = model.to(task.DEVICE)
         self.criterion = torch.nn.MSELoss()
 
     def get_parameters(self, config):
-        # 1. Get parameters as NumPy arrays
         params = [val.detach().cpu().numpy() for val in self.model.parameters()]
-
-        # 2. Calculate Size (The "Communication Cost" Metric)
         total_bytes = sum(p.nbytes for p in params)
         mb = total_bytes / (1024 * 1024)
-
-        # 3. Log it to a file
         with open("communication_log.csv", "a") as f:
             f.write(f"upload,{mb:.4f}\n")
-
         print(f"DEBUG: Client transmitting {mb:.2f} MB")
         return params
 
@@ -37,11 +32,9 @@ class FlowerClient(fl.client.NumPyClient):
     def fit(self, parameters, config_dict):
         self.set_parameters(parameters)
         local_epochs = config.get("federation", "local_epochs") or 3
-        task.train(self.model, self.trainloader, epochs=local_epochs)
+        # Pass both trainloader and valloader to the train function
+        task.train(self.model, self.trainloader, self.valloader, epochs=local_epochs)
         
-        # --- LOCAL CALIBRATION (NEW) ---
-        # Each client saves its own error stats based on the latest global weights
-        # this significantly improves Z-score precision.
         mean_err, std_err = task.get_error_distribution(self.model, self.trainloader)
         stats = {"mean_per_feature": mean_err, "std_per_feature": std_err}
         
@@ -54,24 +47,24 @@ class FlowerClient(fl.client.NumPyClient):
 
     def evaluate(self, parameters, config_dict):
         self.set_parameters(parameters)
-        loss = task.test(self.model, self.trainloader)
-        return float(loss), len(self.trainloader), {"mse": float(loss)}
+        # Evaluate on the validation set
+        loss = task.test(self.model, self.valloader)
+        return float(loss), len(self.valloader), {"mse": float(loss)}
 
 def client_fn(context):
     partition_id = context.node_config.get("partition-id", 0)
     num_partitions = context.node_config.get("num-partitions", 2)
 
-    # Load data and get the count of features
-    trainloader, detected_dim = task.load_partitioned_data(
+    # Load data and get the count of features, now returns trainloader, valloader, input_dim
+    trainloader, valloader, detected_dim = task.load_partitioned_data(
         config.get("data", "processed_data_path"),
         partition_id,
         num_partitions
     )
 
-    # Use hidden_dim from config to match centralized training
-    hidden_dim = config.get("model", "hidden_dim") or 64
+    hidden_dim = config.get("model", "hidden_dim") or 128
     model = task.LSTMAutoencoder(input_dim=detected_dim, hidden_dim=hidden_dim).to(task.DEVICE)
 
-    return FlowerClient(partition_id, trainloader, model).to_client()
+    return FlowerClient(partition_id, trainloader, valloader, model).to_client()
 
 app = fl.client.ClientApp(client_fn=client_fn)
