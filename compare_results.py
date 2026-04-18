@@ -70,7 +70,8 @@ def compare_approaches():
     sort_cols = ['user', time_col] if time_col else ['user']
     df = df.sort_values(sort_cols)
 
-    num_clients = config.get("federation", "num_clients")
+    # num-supernodes değerini pyproject.toml'dan çekiyoruz (num_clients settings.toml'da yok)
+    num_clients = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
     unique_users = sorted(df['user'].unique())
     user_chunks = np.array_split(unique_users, num_clients)
 
@@ -83,7 +84,7 @@ def compare_approaches():
     fed_model = task.LSTMAutoencoder(input_dim=len(expected_features), hidden_dim=128).to(DEVICE)
     with open(FEDERATED_MODEL_PATH, "rb") as f:
         data = pickle.load(f)
-        weights = data.get('global_parameters') or data.get('globa_parameters')
+        weights = data.get('global_parameters')
         fed_model.load_state_dict({k: torch.tensor(v) for k, v in zip(fed_model.state_dict().keys(), weights)})
     fed_model.eval()
 

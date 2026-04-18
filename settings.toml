@@ -35,7 +35,7 @@ save_path = "./model_pickle"
 [efficiency]
 # You can now chain plugins! Order matters: top_k then quantization is usually best.
 # example: active_plugins = ["top_k", "quantization"]
-active_plugins = []
+active_plugins = ["top_k", "quantization"]
 top_k_ratio = 0.05
 
 [model]

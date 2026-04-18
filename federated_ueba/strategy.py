@@ -29,7 +29,7 @@ class FedAvgWithModelSaving(flwr.server.strategy.FedAvg):
     def _save_global_model(self, server_round: int, parameters):
         """A new method to save the parameters to disk."""
         ndarrays = parameters_to_ndarrays(parameters)
-        data = {'globa_parameters': ndarrays}
+        data = {'global_parameters': ndarrays}
         
         # Ensure save_path exists for the current run_id
         save_path_for_run = Path(self.save_path)
