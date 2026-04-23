@@ -25,7 +25,7 @@ selected_features = [
 ]
 
 [federation]
-num_rounds = 200
+num_rounds = 20
 local_epochs = 5
 fraction_fit = 0.5
 min_fit_clients = 2
@@ -35,7 +35,7 @@ save_path = "./model_pickle"
 [efficiency]
 # You can now chain plugins! Order matters: top_k then quantization is usually best.
 # example: active_plugins = ["top_k", "quantization"]
-active_plugins = ["top_k", "quantization"]
+active_plugins = []
 top_k_ratio = 0.05
 
 [model]

@@ -68,7 +68,7 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
     client_full_df = df[df['user'].isin(my_users)].copy()
     # Model only learns from "Normal" behavior
     client_df = client_full_df[client_full_df['insider'] == 0].copy() if 'insider' in client_full_df.columns else client_full_df.copy()
-    
+
     if client_df.empty: return None, None, len(features)
         
     client_df[features] = client_df[features].apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)

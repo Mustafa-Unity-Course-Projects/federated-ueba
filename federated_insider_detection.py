@@ -6,7 +6,6 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import json
-import toml
 from sklearn.metrics import (precision_score, recall_score, f1_score, 
                              average_precision_score, precision_recall_curve, 
                              accuracy_score, balanced_accuracy_score, confusion_matrix)
@@ -215,7 +214,28 @@ def run_evaluation():
         experiment_summary = {
             "run_id": current_run_id,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "config": config._settings,
+            "system_info": {
+                "device": str(DEVICE),
+                "num_clients": num_clients,
+            },
+            "model_architecture": {
+                "input_dim": len(expected_features),
+                "hidden_dim": HIDDEN_DIM,
+                "window_size": task.WINDOW_SIZE,
+            },
+            "training_hyperparameters": {
+                "learning_rate": task.LEARNING_RATE,
+                "batch_size": task.BATCH_SIZE,
+                "num_rounds": config.get("federation", "num_rounds"),
+                "local_epochs": config.get("federation", "local_epochs"),
+                "fraction_fit": config.get("federation", "fraction_fit"),
+            },
+            "anomaly_detection_params": {
+                "top_k_features": TOP_K_FEATURES,
+                "persistence_window": PERSISTENCE_WINDOW,
+                "diversity_threshold": DIVERSITY_THRESHOLD,
+                "scan_stride": SCAN_STRIDE,
+            },
             "best_metrics": best_row.to_dict(),
             "avg_communication_mb": avg_comm_per_round
         }
@@ -263,8 +283,8 @@ if __name__ == "__main__":
     if args.mode in ["full", "train"]:
         cleanup_old_metrics()
         # Save run config immediately
-        with open(os.path.join(REPORT_DIR, "run_config.toml"), "w") as f:
-            toml.dump(config._settings, f)
+        with open(os.path.join(REPORT_DIR, "run_config.json"), "w") as f:
+            json.dump(config._settings, f, indent=4)
 
         num_supernodes = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
         print(f"🚀 Starting Federated Training (Run {current_run_id})...")

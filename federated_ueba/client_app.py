@@ -35,7 +35,7 @@ class FlowerClient(fl.client.NumPyClient):
         with open(log_file, "a") as f:
             f.write(f"upload,{mb:.4f}\n")
         print(f"DEBUG: Client transmitting {mb:.2f} MB for run {global_config.run_id}")
-        
+
         return processed_params
 
     def set_parameters(self, parameters):
