@@ -6,12 +6,6 @@
 efficiency.active_plugins = []
 data.is_non_iid = false
 
-# 2) b) Top-K (ratio: 0.01)
-["top-k-0.01"]
-efficiency.active_plugins = ["top_k"]
-efficiency.top_k_ratio = 0.01
-data.is_non_iid = false
-
 # 3) b) Top-K (ratio: 0.05)
 ["top-k-0.05"]
 efficiency.active_plugins = ["top_k"]
@@ -30,9 +24,9 @@ efficiency.active_plugins = ["quantization"]
 data.is_non_iid = false
 
 # 6) d) Top-K + Quantization combination
-["top-k-0.05-quant-fp16"]
+["top-k-0.1-quant-fp16"]
 efficiency.active_plugins = ["top_k", "quantization"]
-efficiency.top_k_ratio = 0.05
+efficiency.top_k_ratio = 0.1
 data.is_non_iid = false
 
 # 7) g) Non-IID Baseline
@@ -42,8 +36,8 @@ data.is_non_iid = true
 data.non_iid_alpha = 0.5
 
 # 8) g) Non-IID + Top-K + Quantization
-["non-iid-top-k-0.05-quant-fp16"]
+["non-iid-top-k-0.1-quant-fp16"]
 efficiency.active_plugins = ["top_k", "quantization"]
-efficiency.top_k_ratio = 0.05
+efficiency.top_k_ratio = 0.1
 data.is_non_iid = true
 data.non_iid_alpha = 0.5

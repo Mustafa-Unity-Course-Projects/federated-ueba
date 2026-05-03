@@ -6,7 +6,7 @@ BASE_REPORT_DIR = "federated_evaluation_reports"
 
 def compare_experiments():
     print("📊 Comparing Federated Experiment Results...")
-    
+
     experiment_summaries = []
     
     if not os.path.exists(BASE_REPORT_DIR):
@@ -40,7 +40,7 @@ def compare_experiments():
                         "Conv_Round": summary.get("convergence_round"),
                     }
                     experiment_summaries.append(data)
-    
+
     if not experiment_summaries:
         print("No experiment summaries found to compare.")
         return

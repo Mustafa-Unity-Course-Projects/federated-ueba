@@ -44,6 +44,7 @@ def run_single_experiment(experiment_name, mode):
     PERSISTENCE_WINDOW = config.get("anomaly_detection", "persistence_window") or 3
     DIVERSITY_THRESHOLD = config.get("anomaly_detection", "diversity_threshold") or 2.0
     SCAN_STRIDE = config.get("anomaly_detection", "scan_stride") or 1
+    INFERENCE_BATCH_SIZE = config.get("data", "batch_size") or 128 # Re-using batch_size from task.py
 
     # --- Check if experiment is already done ---
     summary_file_path = os.path.join(REPORT_DIR, "experiment_summary.json")
@@ -51,7 +52,7 @@ def run_single_experiment(experiment_name, mode):
         try:
             with open(summary_file_path, "r") as f:
                 summary_data = json.load(f)
-            if summary_data.get("done", False):
+            if summary_data.get("done", False) and mode != "train": # Only skip if done AND not explicitly training
                 print(f"✅ Experiment '{experiment_name}' already completed. Skipping.")
                 return
         except json.JSONDecodeError:
@@ -59,23 +60,34 @@ def run_single_experiment(experiment_name, mode):
             # If corrupted, proceed to re-run and overwrite
 
     def cleanup_old_metrics():
-        # Only cleanup if we are starting a fresh run, not resuming an incomplete one
-        # This check is now more robust as it's within the subprocess
-        if not os.path.exists(summary_file_path) or not summary_data.get("done", False):
+        # Always clean up model and scaler directories for the current experiment
+        # to ensure a fresh start for weights and scalers.
+        if os.path.exists(SAVE_PATH):
+            print(f"🧹 Refreshing model save path: {SAVE_PATH}")
+            shutil.rmtree(SAVE_PATH)
+        if os.path.exists(SCALER_DIR):
+            print(f"🧹 Refreshing scaler data path: {SCALER_DIR}")
+            shutil.rmtree(SCALER_DIR)
+
+        # Conditional cleanup for report directory:
+        # Only clean if the summary file doesn't exist or the previous run was incomplete.
+        current_summary_data = {}
+        if os.path.exists(summary_file_path):
+            try:
+                with open(summary_file_path, "r") as f:
+                    current_summary_data = json.load(f)
+            except json.JSONDecodeError:
+                pass # Treat as corrupted, will be overwritten
+
+        if not os.path.exists(summary_file_path) or not current_summary_data.get("done", False):
             if os.path.exists(REPORT_DIR):
                 print(f"🧹 Refreshing report directory: {REPORT_DIR}")
                 shutil.rmtree(REPORT_DIR)
-            # Also clean up model_pickle and scaler_data for this specific experiment
-            if os.path.exists(SAVE_PATH):
-                print(f"🧹 Refreshing model save path: {SAVE_PATH}")
-                shutil.rmtree(SAVE_PATH)
-            if os.path.exists(SCALER_DIR):
-                print(f"🧹 Refreshing scaler data path: {SCALER_DIR}")
-                shutil.rmtree(SCALER_DIR)
-
+        
+        # Ensure directories exist for the new run
         os.makedirs(ROUND_RESULTS_DIR, exist_ok=True)
-        os.makedirs(SAVE_PATH, exist_ok=True) # Ensure these are created for the new run
-        os.makedirs(SCALER_DIR, exist_ok=True) # Ensure these are created for the new run
+        os.makedirs(SAVE_PATH, exist_ok=True)
+        os.makedirs(SCALER_DIR, exist_ok=True)
 
 
     def calculate_metrics_at_threshold(y_true, y_scores, threshold):
@@ -90,22 +102,23 @@ def run_single_experiment(experiment_name, mode):
             "tp": tp, "fp": fp, "tn": tn, "fn": fn
         }
 
-    def perform_scan(model, df, user_chunks, expected_features, num_clients):
+    def perform_scan(model, df, user_chunks, expected_features, num_clients, baseline_scaler, baseline_mean_per_feature, baseline_std_per_feature):
         results = []
         with torch.no_grad():
             for client_id in range(num_clients):
-                scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=client_id))
-                stats_path = os.path.join(SCALER_DIR, f"error_stats_client_{client_id}.pkl")
-                if not os.path.exists(scaler_path): continue
-                with open(scaler_path, "rb") as f:
-                    scaler = pickle.load(f)
-                
-                if os.path.exists(stats_path):
-                    with open(stats_path, "rb") as f:
-                        calib = pickle.load(f)
-                        mean_per_feature, std_per_feature = calib["mean_per_feature"], calib["std_per_feature"]
-                else:
-                    mean_per_feature, std_per_feature = np.full(len(expected_features), 0.02), np.full(len(expected_features), 0.05)
+                # Removed client-specific scaler and stats loading
+                # scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=client_id))
+                # stats_path = os.path.join(SCALER_DIR, f"error_stats_client_{client_id}.pkl")
+                # if not os.path.exists(scaler_path): continue
+                # with open(scaler_path, "rb") as f:
+                #     scaler = pickle.load(f)
+
+                # if os.path.exists(stats_path):
+                #     with open(stats_path, "rb") as f:
+                #         calib = pickle.load(f)
+                #         mean_per_feature, std_per_feature = calib["mean_per_feature"], calib["std_per_feature"]
+                # else:
+                #     mean_per_feature, std_per_feature = np.full(len(expected_features), 0.02), np.full(len(expected_features), 0.05)
 
                 client_users = user_chunks[client_id]
                 for user in client_users:
@@ -113,26 +126,53 @@ def run_single_experiment(experiment_name, mode):
                     u_features = user_df.reindex(columns=expected_features, fill_value=0)
                     u_features = u_features.apply(pd.to_numeric, errors='coerce').fillna(0).astype(np.float32)
                     u_features = np.log1p(u_features.clip(lower=0))
-                    u_scaled = scaler.transform(u_features)
-                    user_tensor = torch.tensor(u_scaled, dtype=torch.float32).to(DEVICE)
                     
+                    # Use the baseline scaler for all users
+                    u_scaled = baseline_scaler.transform(u_features)
+                    user_tensor = torch.tensor(u_scaled, dtype=torch.float32).to(DEVICE)
+
                     user_window_metrics = []
+                    
                     if len(user_tensor) >= task.WINDOW_SIZE:
+                        windows_to_process = []
+                        original_indices = [] # To map back results to original window positions
+                        
                         for i in range(0, len(user_tensor) - task.WINDOW_SIZE + 1, SCAN_STRIDE):
-                            window = user_tensor[i : i + task.WINDOW_SIZE].unsqueeze(0)
-                            reconstruction = model(window)
-                            sq_err = torch.mean((reconstruction - window)**2, dim=1).squeeze(0).cpu().numpy()
-                            feat_z = (sq_err - mean_per_feature) / (std_per_feature + 1e-6)
-                            pos_feat_z = np.maximum(feat_z, 0)
-                            top_k_z = np.sort(pos_feat_z)[-TOP_K_FEATURES:]
-                            diversity_factor = 1.0 + (np.sum(pos_feat_z > DIVERSITY_THRESHOLD) / len(expected_features))
-                            user_window_metrics.append(np.mean(top_k_z) * diversity_factor)
+                            windows_to_process.append(user_tensor[i : i + task.WINDOW_SIZE])
+                            original_indices.append(i)
+
+                        if not windows_to_process:
+                            final_score = 0.0
+                        else:
+                            # Process in batches
+                            all_window_errors = []
+                            for i in range(0, len(windows_to_process), INFERENCE_BATCH_SIZE):
+                                batch_windows = torch.stack(windows_to_process[i : i + INFERENCE_BATCH_SIZE]).to(DEVICE)
+                                reconstruction_batch = model(batch_windows)
+                                
+                                # Calculate squared error for the batch
+                                sq_err_batch = torch.mean((reconstruction_batch - batch_windows)**2, dim=1).cpu().numpy()
+                                
+                                # Apply Z-score and feature selection for each window in the batch
+                                for sq_err in sq_err_batch:
+                                    # Use the baseline mean and std for Z-score calculation
+                                    feat_z = (sq_err - baseline_mean_per_feature) / (baseline_std_per_feature + 1e-6)
+                                    pos_feat_z = np.maximum(feat_z, 0)
+                                    top_k_z = np.sort(pos_feat_z)[-TOP_K_FEATURES:]
+                                    diversity_factor = 1.0 + (np.sum(pos_feat_z > DIVERSITY_THRESHOLD) / len(expected_features))
+                                    all_window_errors.append(np.mean(top_k_z) * diversity_factor)
+                            
+                            user_window_metrics = all_window_errors
+
+                            if user_window_metrics:
+                                arr = np.sort(np.array(user_window_metrics))
+                                final_score = np.mean(arr[-min(len(arr), PERSISTENCE_WINDOW):])
+                            else:
+                                final_score = 0.0
+                    else: 
+                        final_score = 0.0
 
                     has_insider = (user_df['insider'] != 0).any()
-                    if user_window_metrics:
-                        arr = np.sort(np.array(user_window_metrics))
-                        final_score = np.mean(arr[-min(len(arr), PERSISTENCE_WINDOW):])
-                    else: final_score = 0.0
                     results.append({"user": user, "max_z_score": final_score, "is_actual_insider": 1.0 if has_insider else 0.0})
         return pd.DataFrame(results)
 
@@ -144,13 +184,32 @@ def run_single_experiment(experiment_name, mode):
         num_clients = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
         user_chunks = np.array_split(sorted(df['user'].unique()), num_clients)
 
-        first_scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=0))
-        if not os.path.exists(first_scaler_path):
-            print(f"❌ Error: Scaler file not found at {first_scaler_path}.")
+        # --- Baseline Scaler and Error Stats Loading ---
+        baseline_scaler = None
+        baseline_mean_per_feature = None
+        baseline_std_per_feature = None
+
+        baseline_scaler_path = os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=0))
+        baseline_stats_path = os.path.join(SCALER_DIR, f"error_stats_client_0.pkl")
+
+        if not os.path.exists(baseline_scaler_path):
+            print(f"❌ Error: Baseline Scaler file not found at {baseline_scaler_path}. Cannot perform calibrated evaluation.")
             return
-            
-        with open(first_scaler_path, "rb") as f:
-            expected_features = list(pickle.load(f).feature_names_in_)
+        
+        with open(baseline_scaler_path, "rb") as f:
+            baseline_scaler = pickle.load(f)
+            expected_features = list(baseline_scaler.feature_names_in_) # Get expected features from baseline scaler
+
+        if os.path.exists(baseline_stats_path):
+            with open(baseline_stats_path, "rb") as f:
+                calib = pickle.load(f)
+                baseline_mean_per_feature = calib["mean_per_feature"]
+                baseline_std_per_feature = calib["std_per_feature"]
+        else:
+            print(f"⚠️ Warning: Baseline error stats not found at {baseline_stats_path}. Using default values.")
+            baseline_mean_per_feature = np.full(len(expected_features), 0.02)
+            baseline_std_per_feature = np.full(len(expected_features), 0.05)
+        # --- End Baseline Loading ---
 
         model = task.LSTMAutoencoder(input_dim=len(expected_features), hidden_dim=HIDDEN_DIM).to(DEVICE)
         candidates = []
@@ -183,11 +242,19 @@ def run_single_experiment(experiment_name, mode):
                 model.load_state_dict({k: torch.tensor(w) for k, w in zip(state_dict_keys, weights)})
             model.eval()
             
-            current_results = perform_scan(model, df, user_chunks, expected_features, num_clients)
+            current_results = perform_scan(model, df, user_chunks, expected_features, num_clients, 
+                                           baseline_scaler, baseline_mean_per_feature, baseline_std_per_feature)
             y_true, y_scores = current_results['is_actual_insider'], current_results['max_z_score']
             pr_auc_val = average_precision_score(y_true, y_scores)
             precision_vals, recall_vals, thresholds_vals = precision_recall_curve(y_true, y_scores)
-            f1_scores = np.where((precision_vals + recall_vals) > 0, (2 * precision_vals * recall_vals) / (precision_vals + recall_vals), 0)
+            
+            # Robust F1 score calculation to avoid RuntimeWarning for division by zero
+            numerator = 2 * precision_vals * recall_vals
+            denominator = precision_vals + recall_vals
+            f1_scores = np.zeros_like(numerator)
+            non_zero_denominator_mask = denominator > 0
+            f1_scores[non_zero_denominator_mask] = numerator[non_zero_denominator_mask] / denominator[non_zero_denominator_mask]
+
             best_f1_idx = np.argmax(f1_scores)
             opt_threshold = thresholds_vals[best_f1_idx] if best_f1_idx < len(thresholds_vals) else thresholds_vals[-1]
             
@@ -246,8 +313,6 @@ def run_single_experiment(experiment_name, mode):
     try:
         if mode in ["full", "train"]:
             cleanup_old_metrics()
-            # os.makedirs(SAVE_PATH, exist_ok=True) # Handled by cleanup_old_metrics
-            # os.makedirs(SCALER_DIR, exist_ok=True) # Handled by cleanup_old_metrics
             
             num_supernodes = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
             print(f"🚀 Starting Federated Training for {experiment_name}...")
@@ -288,7 +353,7 @@ if __name__ == "__main__":
                 try:
                     with open(summary_file_path, "r") as f:
                         summary_data = json.load(f)
-                    if summary_data.get("done", False):
+                    if summary_data.get("done", False) and args.mode != "train":
                         print(f"✅ Experiment '{exp_name}' already completed. Skipping subprocess creation.")
                         continue
                 except json.JSONDecodeError:

@@ -9,15 +9,12 @@ from sklearn.model_selection import train_test_split
 from config_manager import config
 
 # --- CONFIGURATION ---
-LEARNING_RATE = config.get("model", "learning_rate") or 0.0008
 WINDOW_SIZE = config.get("model", "window_size") or 14
 STRIDE = config.get("model", "stride") or 1
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = config.get("data", "batch_size") or 128
 SELECTED_FEATURES = config.get("data", "selected_features") or None
 HIDDEN_DIM = config.get("model", "hidden_dim") or 128
-SCALER_DIR = config.get("data", "scaler_dir")
-SCALER_FILENAME_TEMPLATE = config.get("data", "scaler_filename_template")
 TEST_SIZE = config.get("data", "test_size") or 0.2
 
 _cached_df = None
@@ -25,7 +22,7 @@ _cached_df = None
 class LSTMAutoencoder(nn.Module):
     def __init__(self, input_dim, hidden_dim=128):
         super(LSTMAutoencoder, self).__init__()
-        self.encoder = nn.LSTM(input_dim, hidden_dim // 2, num_layers=2, 
+        self.encoder = nn.LSTM(input_dim, hidden_dim // 2, num_layers=2,
                               batch_first=True, dropout=0.2, bidirectional=True)
         self.bottleneck = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
@@ -77,8 +74,10 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
     scaler = StandardScaler()
     client_df[features] = scaler.fit_transform(client_df[features])
     
-    os.makedirs(SCALER_DIR, exist_ok=True)
-    with open(os.path.join(SCALER_DIR, SCALER_FILENAME_TEMPLATE.format(i=partition_id)), "wb") as f:
+    scaler_dir = config.get("data", "scaler_dir")
+    scaler_filename_template = config.get("data", "scaler_filename_template")
+    os.makedirs(scaler_dir, exist_ok=True)
+    with open(os.path.join(scaler_dir, scaler_filename_template.format(i=partition_id)), "wb") as f:
         pickle.dump(scaler, f)
         
     sequences = []
@@ -93,9 +92,9 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
     # Split into Train and Validation to monitor overfitting
     train_seq, val_seq = train_test_split(np.array(sequences), test_size=TEST_SIZE, random_state=42)
         
-    train_loader = torch.utils.data.DataLoader(torch.tensor(train_seq, dtype=torch.float32), 
+    train_loader = torch.utils.data.DataLoader(torch.tensor(train_seq, dtype=torch.float32),
                                               batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(torch.tensor(val_seq, dtype=torch.float32), 
+    val_loader = torch.utils.data.DataLoader(torch.tensor(val_seq, dtype=torch.float32),
                                             batch_size=BATCH_SIZE, shuffle=False)
                                             
     return train_loader, val_loader, len(features)
@@ -103,7 +102,8 @@ def load_partitioned_data(input_path, partition_id, num_partitions):
 def train(net, trainloader, valloader, epochs):
     net.to(DEVICE)
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
+    learning_rate = config.get("model", "learning_rate") or 0.0008
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, weight_decay=1e-4)
     
     for epoch in range(epochs):
         net.train()

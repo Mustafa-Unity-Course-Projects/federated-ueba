@@ -14,6 +14,7 @@ MIN_FIT_CLIENTS = config.get("federation", "min_fit_clients") or 2
 MIN_AVAILABLE_CLIENTS = config.get("federation", "min_available_clients") or 2
 SAVE_PATH = config.get("federation", "save_path")
 SCALER_DIR = config.get("data", "scaler_dir") or "scaler_data"
+FEDERATED_EVAL_REPORTS_DIR = "federated_evaluation_reports" # Assuming this is the base directory
 
 def cleanup():
     """Removes previous run data: model_pickle, scaler_data, and communication logs for the CURRENT run_id."""
@@ -25,11 +26,11 @@ def cleanup():
             shutil.rmtree(folder)
             print(f"  Removed folder: {folder}")
             
-    # Remove Log Files - make it run specific
-    log_file = f"communication_log_{config.run_id}.csv"
-    if os.path.exists(log_file):
-        os.remove(log_file)
-        print(f"  Removed log file: {log_file}")
+    # Remove Log Files and associated run directory
+    run_log_dir = os.path.join(FEDERATED_EVAL_REPORTS_DIR, str(config.run_id))
+    if os.path.exists(run_log_dir):
+        shutil.rmtree(run_log_dir)
+        print(f"  Removed run log directory: {run_log_dir}")
 
 def aggregate_evaluate_metrics(
     results: List[Tuple[int, Dict[str, Scalar]]]
