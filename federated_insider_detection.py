@@ -13,11 +13,23 @@ import argparse
 import subprocess
 import time
 from datetime import datetime
+import random # Import the random module
 
 # --- 1. RUN ID ORCHESTRATION ---
 BASE_REPORT_DIR = "federated_evaluation_reports"
 
 def run_single_experiment(experiment_name, mode):
+    # Set fixed seeds for reproducibility
+    SEED = 42
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(SEED)
+        torch.cuda.manual_seed_all(SEED)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     # Inject into environment so config_manager picks it up
     os.environ["EXPERIMENT_NAME"] = experiment_name
     
@@ -179,7 +191,7 @@ def run_single_experiment(experiment_name, mode):
     def run_evaluation():
         os.makedirs(ROUND_RESULTS_DIR, exist_ok=True)
         print(f"📊 Starting Evaluation for '{experiment_name}'...")
-        
+
         df = pd.read_csv(DATA_PATH, low_memory=False)
         num_clients = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
         user_chunks = np.array_split(sorted(df['user'].unique()), num_clients)
@@ -195,7 +207,7 @@ def run_single_experiment(experiment_name, mode):
         if not os.path.exists(baseline_scaler_path):
             print(f"❌ Error: Baseline Scaler file not found at {baseline_scaler_path}. Cannot perform calibrated evaluation.")
             return
-        
+
         with open(baseline_scaler_path, "rb") as f:
             baseline_scaler = pickle.load(f)
             expected_features = list(baseline_scaler.feature_names_in_) # Get expected features from baseline scaler
@@ -224,7 +236,7 @@ def run_single_experiment(experiment_name, mode):
         summary_data = []
         best_pr_auc, best_round, best_results = 0, -1, None
         comm_log_path = os.path.join(REPORT_DIR, f"communication_log.csv")
-        
+
         total_comm_mb = 0
         if os.path.exists(comm_log_path):
             comm_df = pd.read_csv(comm_log_path, header=None)
@@ -313,11 +325,11 @@ def run_single_experiment(experiment_name, mode):
     try:
         if mode in ["full", "train"]:
             cleanup_old_metrics()
-            
+
             num_supernodes = config.get_pyproject("tool", "flwr", "federations", "local-simulation", "options", "num-supernodes") or 10
             print(f"🚀 Starting Federated Training for {experiment_name}...")
             subprocess.run(["flower-simulation", "--app", ".", "--num-supernodes", str(num_supernodes)], check=True)
-        
+
         if mode in ["full", "eval"]:
             experiment_successful = run_evaluation()
     except Exception as e:

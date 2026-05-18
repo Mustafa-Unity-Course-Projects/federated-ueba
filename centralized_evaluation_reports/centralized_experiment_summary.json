@@ -1,0 +1,29 @@
+{
+    "model_path": "centralized_model.pth",
+    "scaler_path": "centralized_scaler.pkl",
+    "error_stats_path": "centralized_error_stats.pkl",
+    "best_validation_loss": 0.39576275249696524,
+    "epochs_trained": 100,
+    "early_stopping_patience": 10,
+    "epochs_config": 100,
+    "batch_size": 64,
+    "learning_rate": 0.0008,
+    "hidden_dim": 128,
+    "input_features_count": 50,
+    "window_size": 14,
+    "stride": 1,
+    "device": "cuda",
+    "anomaly_detection_metrics": {
+        "pr_auc": 0.8263561809570273,
+        "best_f1": 0.9241379310344827,
+        "optimal_threshold": 124.2569497331807,
+        "precision_at_best_f1": 0.8933333333333333,
+        "recall_at_best_f1": 0.9571428571428572,
+        "accuracy_at_best_f1": 0.989,
+        "balanced_accuracy_at_best_f1": 0.9742703533026114,
+        "tp_at_best_f1": 67,
+        "fp_at_best_f1": 8,
+        "tn_at_best_f1": 922,
+        "fn_at_best_f1": 3
+    }
+}

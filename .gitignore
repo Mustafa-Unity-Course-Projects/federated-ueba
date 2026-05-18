@@ -17,7 +17,6 @@ venv_wsl/
 model_pickle/
 scaler_data/
 communication_log.csv
-federated_evaluation_reports
 
 # Distribution / packaging
 .Python
