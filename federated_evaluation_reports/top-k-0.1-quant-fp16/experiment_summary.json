@@ -1,6 +1,6 @@
 {
     "experiment_name": "top-k-0.1-quant-fp16",
-    "timestamp": "2026-05-07 18:51:33",
+    "timestamp": "2026-05-06 22:45:40",
     "config": {
         "project": {
             "name": "F-UEBA-Communication-Efficiency",
@@ -69,7 +69,7 @@
             ]
         },
         "federation": {
-            "num_rounds": 50,
+            "num_rounds": 100,
             "local_epochs": 5,
             "fraction_fit": 0.5,
             "min_fit_clients": 2,
@@ -102,22 +102,22 @@
         }
     },
     "best_metrics": {
-        "Round": 22.0,
-        "PR-AUC": 0.7175634997758759,
-        "Max-F1": 0.8344370860927153,
-        "Precision": 0.7777777777777778,
-        "Recall": 0.9,
-        "Accuracy": 0.975,
-        "Balanced_Accuracy": 0.9403225806451613,
-        "TP": 63.0,
-        "FP": 18.0,
-        "TN": 912.0,
-        "FN": 7.0,
-        "Optimal-Threshold": 13.5312477238973
+        "Round": 20.0,
+        "PR-AUC": 0.7396974859148825,
+        "Max-F1": 0.8783783783783784,
+        "Precision": 0.8333333333333334,
+        "Recall": 0.9285714285714286,
+        "Accuracy": 0.982,
+        "Balanced_Accuracy": 0.9572964669738864,
+        "TP": 65.0,
+        "FP": 13.0,
+        "TN": 917.0,
+        "FN": 5.0,
+        "Optimal-Threshold": 16.06888942718506
     },
-    "total_communication_mb": 321.4124999999999,
-    "avg_communication_per_round_mb": 0.2569244604316546,
+    "total_communication_mb": 642.2805999999998,
+    "avg_communication_per_round_mb": 0.2569122399999999,
     "convergence_round": 16,
-    "best_round": 22,
+    "best_round": 20,
     "done": true
 }

@@ -5,7 +5,7 @@ version = "1.2.0"
 [data]
 dataset_path = "./dataset/r4.2"
 processed_data_path = "./ExtractedData/dayr4.2-percentile30.csv"
-scaler_dir= "scaler_data"
+scaler_dir= "scaler_data/{run_id}"
 scaler_filename_template = "scaler_client_{i}.pkl"
 test_size = 0.2
 batch_size = 128

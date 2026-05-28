@@ -9,6 +9,12 @@ __pycache__/
 # C extensions
 *.so
 
+# data extensions
+*.pth
+*.pkl
+*.csv
+
+
 # project-related
 dataset/
 ExtractedData/

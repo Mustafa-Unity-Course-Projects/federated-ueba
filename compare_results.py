@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score
 import federated_ueba.task as task
 from config_manager import config
-from insider_detection import generate_report
+from central_insider_detection import generate_report
 
 # --- CONFIGURATION ---
 FEDERATED_MODEL_PATH = os.path.join(config.get("federation", "save_path"), "parameters_round_20.pkl")

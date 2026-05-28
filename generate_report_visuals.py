@@ -6,9 +6,10 @@ from pathlib import Path
 
 # --- Configuration ---
 PROJECT_ROOT = Path("C:/Users/mspcacc/Desktop/college/tez/proj")
-# Corrected path for the benchmarks CSV
-BENCHMARKS_CSV_PATH = PROJECT_ROOT / "federated_evaluation_reports" / "federated_experiment_comparison.csv"
+# Corrected path for the benchmarks CSV to match compare_experiments.py output
+BENCHMARKS_CSV_PATH = PROJECT_ROOT / "experiment_comparison_summary.csv"
 RESULTS_BASE_DIR = PROJECT_ROOT / "federated_evaluation_reports"
+CENTRALIZED_REPORT_DIR = PROJECT_ROOT / "centralized_evaluation_reports" # New: Centralized report dir
 OUTPUT_DIR = PROJECT_ROOT / "generated_visuals"
 
 # Ensure output directory exists
@@ -73,6 +74,7 @@ def generate_comparison_table(csv_path, output_dir):
     # Select and reorder columns for the report
     report_columns = [
         "Experiment",
+        "Type", # Include Type column
         "PR-AUC",
         "Max-F1",
         "Balanced_Acc",
@@ -93,6 +95,7 @@ def generate_comparison_table(csv_path, output_dir):
     # Rename columns for better readability in the report
     df_report.rename(columns={
         "Experiment": "Exp. Config.",
+        "Type": "Type",
         "PR-AUC": "PR-AUC",
         "Max-F1": "Max-F1",
         "Balanced_Acc": "Bal. Acc.",
@@ -102,14 +105,26 @@ def generate_comparison_table(csv_path, output_dir):
         "Conv_Round": "Conv. Round"
     }, inplace=True)
 
+    # --- FIX: Handle NaN/None for centralized model (e.g., Total Comm. (MB), Conv. Round) ---
+    # Convert to numeric first, coercing errors to NaN
+    df_report["Total Comm. (MB)"] = pd.to_numeric(df_report["Total Comm. (MB)"], errors='coerce')
+    df_report["Conv. Round"] = pd.to_numeric(df_report["Conv. Round"], errors='coerce')
+
+    # Now round numeric values
+    df_report["Total Comm. (MB)"] = df_report["Total Comm. (MB)"].round(1)
+
+    # Fill NaNs with "N/A". This will convert the column dtype to 'object' if "N/A" is introduced.
+    df_report["Total Comm. (MB)"] = df_report["Total Comm. (MB)"].fillna("N/A")
+    df_report["Conv. Round"] = df_report["Conv. Round"].fillna("N/A")
+
+
     # Format float columns for better presentation (e.g., 3 decimal places)
     for col in ["PR-AUC", "Max-F1", "Bal. Acc.", "Precision", "Recall"]:
         df_report[col] = df_report[col].round(3)
-    df_report["Total Comm. (MB)"] = df_report["Total Comm. (MB)"].round(1)
-    df_report["Conv. Round"] = df_report["Conv. Round"].astype(int)
-
+    
     col_widths_dict = {
-        "Exp. Config.": 0.25,
+        "Exp. Config.": 0.20, # Adjusted width
+        "Type": 0.08, # New column
         "Total Comm. (MB)": 0.15
     }
     
@@ -118,28 +133,27 @@ def generate_comparison_table(csv_path, output_dir):
 
 # --- 2. Generate Figure 2 (Learning Curve Graph) ---
 def generate_learning_curve_graph(results_base_dir, output_dir):
-    all_f1_data = []
+    all_pr_auc_data = []
     
-    # Iterate through each experiment subdirectory
+    # Iterate through each federated experiment subdirectory
     for exp_dir in results_base_dir.iterdir():
         if exp_dir.is_dir():
             exp_name = exp_dir.name
-            # Look for federated_rounds_comparison.csv inside the experiment directory
             filepath = exp_dir / "federated_rounds_comparison.csv"
 
             if filepath.exists():
                 try:
                     df_round_metrics = pd.read_csv(filepath)
-                    # Assuming 'Round' and 'Max-F1' columns exist in this CSV
-                    if "Round" in df_round_metrics.columns and "Max-F1" in df_round_metrics.columns:
+                    if "Round" in df_round_metrics.columns and "PR-AUC" in df_round_metrics.columns:
                         for index, row in df_round_metrics.iterrows():
-                            all_f1_data.append({
+                            current_round = int(row["Round"])
+                            all_pr_auc_data.append({
                                 "Exp. Config.": exp_name,
-                                "Round": int(row["Round"]),
-                                "Max-F1 Score": float(row["Max-F1"])
+                                "Round": current_round,
+                                "PR-AUC Score": float(row["PR-AUC"])
                             })
                     else:
-                        print(f"Warning: 'Round' or 'Max-F1' column not found in {filepath}. Skipping.")
+                        print(f"Warning: 'Round' or 'PR-AUC' column not found in {filepath}. Skipping.")
                 except pd.errors.EmptyDataError:
                     print(f"Warning: {filepath} is empty. Skipping.")
                 except Exception as e:
@@ -147,21 +161,23 @@ def generate_learning_curve_graph(results_base_dir, output_dir):
             else:
                 print(f"Warning: federated_rounds_comparison.csv not found in {exp_dir}. Skipping.")
     
-    if not all_f1_data:
-        print(f"Warning: No round-by-round metrics found in subdirectories of {results_base_dir}. Cannot generate learning curve graph.")
+    # Removed Centralized Model data from here as requested
+    
+    if not all_pr_auc_data:
+        print(f"Warning: No round-by-round metrics found. Cannot generate learning curve graph.")
         return
 
-    df_f1 = pd.DataFrame(all_f1_data)
+    df_pr_auc = pd.DataFrame(all_pr_auc_data)
 
     plt.figure(figsize=(12, 7))
-    sns.lineplot(data=df_f1, x="Round", y="Max-F1 Score", hue="Exp. Config.", marker="o")
-    plt.title("Figure 2: Max F1 Score Over Rounds", fontsize=16)
+    sns.lineplot(data=df_pr_auc, x="Round", y="PR-AUC Score", hue="Exp. Config.", marker="o")
+    plt.title("Figure 2: PR-AUC Score Over Rounds (Federated Experiments)", fontsize=16) # Updated title
     plt.xlabel("Round", fontsize=12)
-    plt.ylabel("Max F1 Score", fontsize=12)
+    plt.ylabel("PR-AUC Score", fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend(title="Exp.", bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    fig_path = output_dir / "Figure_2_Learning_Curve.png"
+    fig_path = output_dir / "Figure_2_Learning_Curve_PR_AUC.png"
     plt.savefig(fig_path)
     print(f"Generated Figure 2: {fig_path}")
     plt.close()
@@ -174,29 +190,47 @@ def generate_tradeoff_graph(csv_path, output_dir):
         print(f"Error: {csv_path} not found. Cannot generate trade-off graph. Please ensure 'compare_experiments.py' has been run successfully.")
         return
 
+    # Use the full dataframe, no longer filtering out centralized
+    df_plot = df_benchmarks.copy()
+
+    # Ensure 'Total_Comm_MB' is numeric for plotting
+    df_plot["Total_Comm_MB"] = pd.to_numeric(df_plot["Total_Comm_MB"], errors='coerce')
+    
+    # For Centralized model, set Total_Comm_MB to 0 for plotting
+    df_plot.loc[df_plot['Experiment'] == 'Centralized', 'Total_Comm_MB'] = 0
+
+    # Drop rows where 'Total_Comm_MB' or 'PR-AUC' might be NaN after coercion (e.g., if 'N/A' was present and couldn't be converted)
+    df_plot.dropna(subset=["Total_Comm_MB", "PR-AUC"], inplace=True)
+
+    if df_plot.empty:
+        print("Warning: No data with valid communication cost and PR-AUC found for trade-off graph. Skipping.")
+        return
+
     plt.figure(figsize=(10, 6))
     sns.scatterplot(
-        data=df_benchmarks,
+        data=df_plot, # Use df_plot
         x="Total_Comm_MB",
-        y="Max-F1",
+        y="PR-AUC",
         hue="Experiment",
         s=100,
         alpha=0.8
     )
-    plt.title("Figure 3: Comm. Cost vs. Det. Perf. Trade-off", fontsize=14)
+    plt.title("Figure 3: Comm. Cost vs. PR-AUC Trade-off (Federated vs. Centralized Experiments)", fontsize=14) # Updated title
     plt.xlabel("Total Comm. Cost (MB)", fontsize=12)
-    plt.ylabel("Max F1 Score", fontsize=12)
+    plt.ylabel("PR-AUC Score", fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend(title="Exp.", bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    fig_path = output_dir / "Figure_3_Tradeoff.png"
+    fig_path = output_dir / "Figure_3_Tradeoff_PR_AUC.png"
     plt.savefig(fig_path)
     print(f"Generated Figure 3: {fig_path}")
     plt.close()
 
 # --- 4. Generate Configuration Settings Table ---
-def generate_config_table(results_base_dir, output_dir):
+def generate_config_table(results_base_dir, centralized_report_dir, output_dir): # Added centralized_report_dir
     config_data = []
+    
+    # Load Federated Configurations
     for exp_dir in results_base_dir.iterdir():
         if exp_dir.is_dir():
             summary_path = exp_dir / "experiment_summary.json"
@@ -211,17 +245,25 @@ def generate_config_table(results_base_dir, output_dir):
                     model_config = config.get("model", {})
                     data_config = config.get("data", {})
 
+                    plugins_str = ", ".join(efficiency_config.get("active_plugins", [])) or "None"
+                    top_k_ratio_val = efficiency_config.get("top_k_ratio", "N/A")
+
+                    # Set Top-K Ratio to "N/A" if top_k plugin is not enabled
+                    if "top_k" not in plugins_str and "top_k, quantization" not in plugins_str:
+                        top_k_ratio_val = "N/A"
+
                     config_entry = {
                         "Experiment": exp_summary.get("experiment_name", exp_dir.name),
+                        "Type": "Federated",
                         "Non-IID": data_config.get("is_non_iid", "N/A"),
                         "Rounds": federation_config.get("num_rounds", "N/A"),
                         "Local Epochs": federation_config.get("local_epochs", "N/A"),
                         "Frac. Fit": federation_config.get("fraction_fit", "N/A"),
-                        "Plugins": ", ".join(efficiency_config.get("active_plugins", [])),
-                        "Top-K Ratio": efficiency_config.get("top_k_ratio", "N/A"),
+                        "Plugins": plugins_str,
+                        "Top-K Ratio": top_k_ratio_val,
                         "LR": model_config.get("learning_rate", "N/A"),
-                        "Window Size": model_config.get("window_size", "N/A"),
-                        "Hidden Dim": model_config.get("hidden_dim", "N/A")
+                        "Win. Size": model_config.get("window_size", "N/A"), # Shortened
+                        "Hid. Dim": model_config.get("hidden_dim", "N/A") # Shortened
                     }
                     config_data.append(config_entry)
                 except Exception as e:
@@ -229,23 +271,62 @@ def generate_config_table(results_base_dir, output_dir):
             else:
                 print(f"Warning: experiment_summary.json not found in {exp_dir}. Skipping.")
     
+    # Load Centralized Configuration
+    centralized_summary_path = centralized_report_dir / "centralized_experiment_summary.json"
+    centralized_config_entry = None
+    if centralized_summary_path.exists():
+        try:
+            with open(centralized_summary_path, 'r') as f:
+                centralized_summary = json.load(f)
+            
+            # For centralized, Plugins and Top-K Ratio are always N/A
+            centralized_config_entry = {
+                "Experiment": "Centralized",
+                "Type": "Centralized",
+                "Non-IID": centralized_summary.get("data_config", {}).get("is_non_iid", "N/A"), # Assuming data_config might be nested
+                "Rounds": "N/A", # Not applicable
+                "Local Epochs": centralized_summary.get("epochs_trained", "N/A"), 
+                "Frac. Fit": "N/A", # Not applicable
+                "Plugins": "N/A", # Not applicable
+                "Top-K Ratio": "N/A", # Always N/A for centralized
+                "LR": centralized_summary.get("learning_rate", "N/A"),
+                "Win. Size": centralized_summary.get("window_size", "N/A"), # Shortened
+                "Hid. Dim": centralized_summary.get("hidden_dim", "N/A") # Shortened
+            }
+            # Add centralized entry to config_data only if successfully loaded
+            # It will be reordered later
+            config_data.append(centralized_config_entry)
+        except Exception as e:
+            print(f"Warning: Could not read or parse {centralized_summary_path}: {e}. Skipping centralized config.")
+    else:
+        print(f"Warning: Centralized summary file '{centralized_summary_path}' not found. Skipping centralized config.")
+
+
     if not config_data:
-        print(f"Warning: No configuration data found in subdirectories of {results_base_dir}. Cannot generate config table.")
+        print(f"Warning: No configuration data found. Cannot generate config table.")
         return
 
     df_config = pd.DataFrame(config_data)
 
+    # Reorder to place 'Centralized' at the top
+    if centralized_config_entry: # Check if centralized entry was successfully created
+        centralized_df = df_config[df_config["Experiment"] == "Centralized"]
+        other_configs_df = df_config[df_config["Experiment"] != "Centralized"]
+        df_config = pd.concat([centralized_df, other_configs_df], ignore_index=True)
+
+
     col_widths_dict = {
         "Experiment": 0.15,
-        "Non-IID": 0.08,
-        "Rounds": 0.08,
-        "Local Epochs": 0.1,
-        "Frac. Fit": 0.08,
-        "Plugins": 0.15,
-        "Top-K Ratio": 0.1,
-        "LR": 0.08,
-        "Window Size": 0.1,
-        "Hidden Dim": 0.08
+        "Type": 0.08,
+        "Non-IID": 0.07,
+        "Rounds": 0.07,
+        "Local Epochs": 0.09,
+        "Frac. Fit": 0.07,
+        "Plugins": 0.12,
+        "Top-K Ratio": 0.08,
+        "LR": 0.07,
+        "Win. Size": 0.08, # Updated key
+        "Hid. Dim": 0.07 # Updated key
     }
 
     create_table_png(df_config, "Table 3: Configuration Settings", output_dir / "Table_3_Config_Settings.png", col_widths_dict)
@@ -256,5 +337,5 @@ print("Generating visuals...")
 generate_comparison_table(BENCHMARKS_CSV_PATH, OUTPUT_DIR)
 generate_learning_curve_graph(RESULTS_BASE_DIR, OUTPUT_DIR)
 generate_tradeoff_graph(BENCHMARKS_CSV_PATH, OUTPUT_DIR)
-generate_config_table(RESULTS_BASE_DIR, OUTPUT_DIR) # New call
+generate_config_table(RESULTS_BASE_DIR, CENTRALIZED_REPORT_DIR, OUTPUT_DIR) # Updated call with centralized_report_dir
 print("Visual generation complete.")

@@ -11,15 +11,15 @@ from config_manager import config
 # --- CONFIGURATION ---
 CENTRALIZED_MODEL_PATH = "centralized_model.pth"
 CENTRALIZED_SCALER_PATH = "centralized_scaler.pkl"
-ERROR_STATS_PATH = "centralized_error_stats.pkl"
+ERROR_STATS_PATH = "centralized_error_stats.pkl" # Still needed for per-feature stats
 DATA_PATH = config.get("data", "processed_data_path")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SCAN_STRIDE = 1 
+SCAN_STRIDE = config.get("anomaly_detection", "scan_stride") or 1 # Load from config
 SELECTED_FEATURES = config.get("data", "selected_features") or None
 HIDDEN_DIM = config.get("model", "hidden_dim") or 64
-TOP_K_FEATURES = 5
-PERSISTENCE_WINDOW = 3 # Average the top 3 worst windows
-DIVERSITY_THRESHOLD = 2.0 # Minimum Z-score to consider a feature "deviating"
+TOP_K_FEATURES = config.get("anomaly_detection", "top_k_features") or 5 # Load from config
+PERSISTENCE_WINDOW = config.get("anomaly_detection", "persistence_window") or 3 # Load from config
+DIVERSITY_THRESHOLD = config.get("anomaly_detection", "diversity_threshold") or 2.0 # Load from config
 
 def run_zscore_scan():
     print(f"🚀 Starting Multi-Vector Bidirectional Scan on {DEVICE}...")
@@ -46,8 +46,8 @@ def run_zscore_scan():
         stats = pickle.load(f)
         mean_per_feature = stats["mean_per_feature"]
         std_per_feature = stats["std_per_feature"]
-        topk_metric_mean = stats["topk_metric_mean"]
-        topk_metric_std = stats["topk_metric_std"]
+        # topk_metric_mean = stats["topk_metric_mean"] # No longer needed
+        # topk_metric_std = stats["topk_metric_std"] # No longer needed
 
     # 3. Scanning Loop
     results = []
@@ -68,16 +68,16 @@ def run_zscore_scan():
                     window = user_tensor[i : i + task.WINDOW_SIZE].unsqueeze(0)
                     reconstruction = model(window)
                     
-                    # Calculate per-feature deviation
-                    per_feature_abs_error = torch.mean(torch.abs(reconstruction - window), dim=1).squeeze(0).cpu().numpy()
-                    feat_z = (per_feature_abs_error - mean_per_feature) / (std_per_feature + 1e-6)
+                    # Calculate per-feature squared error (to match federated)
+                    per_feature_sq_error = torch.mean((reconstruction - window)**2, dim=1).squeeze(0).cpu().numpy()
+                    feat_z = (per_feature_sq_error - mean_per_feature) / (std_per_feature + 1e-6)
                     
                     # TOP-K LOGIC with DIVERSITY FACTOR
                     pos_feat_z = np.maximum(feat_z, 0)
                     top_k_z = np.sort(pos_feat_z)[-TOP_K_FEATURES:]
                     
                     # --- NEW: COOPERATIVE DEVIATION BOOST ---
-                    # How many features are significantly deviating (> 2 std devs)?
+                    # How many features are significantly deviating (> DIVERSITY_THRESHOLD)?
                     num_anomalous_features = np.sum(pos_feat_z > DIVERSITY_THRESHOLD)
                     diversity_factor = 1.0 + (num_anomalous_features / len(expected_features))
                     
@@ -88,14 +88,15 @@ def run_zscore_scan():
             
             if user_window_metrics:
                 user_window_metrics = np.sort(np.array(user_window_metrics))
-                top_metrics_avg = np.mean(user_window_metrics[-min(len(user_window_metrics), PERSISTENCE_WINDOW):])
-                final_z_score = (top_metrics_avg - topk_metric_mean) / (topk_metric_std + 1e-6)
+                # The final anomaly score is the average of the top PERSISTENCE_WINDOW metrics
+                # No second Z-score normalization (to match federated)
+                final_anomaly_score = np.mean(user_window_metrics[-min(len(user_window_metrics), PERSISTENCE_WINDOW):])
             else:
-                final_z_score = 0.0
+                final_anomaly_score = 0.0
 
             results.append({
                 "user": user,
-                "max_z_score": final_z_score,
+                "max_z_score": final_anomaly_score, # Renamed for clarity, but still assigned to max_z_score
                 "is_actual_insider": 1.0 if has_insider_activity else 0.0
             })
 
