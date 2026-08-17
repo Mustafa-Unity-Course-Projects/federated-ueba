@@ -24,6 +24,12 @@ model_pickle/
 scaler_data/
 communication_log.csv
 
+# thesis / paper / presentation deliverables — kept out of history, backed up separately
+ieee/
+logs/
+*.docx
+*.pptx
+
 # Distribution / packaging
 .Python
 .idea/
@@ -146,6 +152,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+misc/
 
 # Spyder project settings
 .spyderproject
@@ -177,3 +184,74 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+sweep.pid
+settings.toml
+
+# Evaluation output: heavy artefacts out, per-run summaries in.
+# The directories themselves are re-included because git will not descend
+# into an excluded directory, which would make the negations dead.
+federated_evaluation_reports/**
+!federated_evaluation_reports/**/
+!federated_evaluation_reports/**/experiment_summary.json
+
+# Pipeline 7'den kalan tek kol. Sürüm 8'de çeşitlilik çarpanı varsayılan olarak
+# kapandığı için ablasyonun yönü tersine döndü ve bu kolun yerini
+# `ablation-with-diversity` aldı. Özetleri hâlâ diskte ama v7 damgası taşıyor,
+# yani PR-AUC değerleri geçersiz. Dışarıda kalmasının sebebi yer değil: yayımlanan
+# ağaçta duran geçersiz bir kol, okuyanın ondan sayı türetmesine açık kapı bırakır.
+federated_evaluation_reports/ablation-no-diversity__seed*/
+
+centralized_evaluation_reports/**
+!centralized_evaluation_reports/**/
+!centralized_evaluation_reports/**/centralized_experiment_summary.json
+
+# Generated figures
+generated_visuals/
+
+# Manuscript and thesis deliverables, versioned separately
+Bildiri.md
+thesis_paper.md
+Y*ksek Lisans Yap*lanlar.md
+Y*ksek Lisans Yap*lanlar.pdf
+federated_architecture
+federated_architecture.pdf
+f_ueba_clean_client_server_architecture.png
+
+# Analysis console dumps
+v8_*.txt
+
+# Backups
+results_backup_*/
+.last_backup
+
+# Superseded configs and scripts
+archive/
+
+# Local tooling and editor configuration
+.claude/
+.geminiignore
+AGENTS.md
+
+# Working notes, not part of the package
+DEVAM.md
+REFACTOR_PLAN.md
+docs/
+scripts/
+reporting/
+
+# Platform-specific sweep wrappers; run_sweep.ps1 is the maintained one
+run_sweep.cmd
+run_sweep.sh
+run_sweep_phase2.sh
+
+# Bütün markdown dosyaları. Repoda anlatı belge tutulmuyor; anlatılacak ne varsa
+# kodun kendi yorumlarında ve docstring'lerinde duruyor. Sebebi bakım: bu
+# depodaki markdown belgeler kodun gerisinde kaldı ve kodun yaptığından farklı
+# şeyler anlatır hale geldi, yani düzeltilmesi gereken ikinci bir gerçek kaynağı
+# oldular.
+*.md
+
+# Tek istisna. README deponun giris sayfasi: verinin nasil hazirlandigi,
+# sweep'in nasil kosuldugu ve durduruldugu, hangi sayinin hangi kuraldan
+# geldigi orada yaziyor ve bunlarin hicbiri koddan okunamiyor.
+!README.md

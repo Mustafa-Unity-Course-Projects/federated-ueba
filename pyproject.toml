@@ -40,8 +40,788 @@ default = "local-simulation"
 [tool.flwr.federations.local-simulation]
 options.num-supernodes = 50
 
+# Resource ceiling, so a sweep leaves the machine usable.
+#
+# Ray decides how many client actors run at once from these numbers. The
+# defaults are num_cpus = 2 and num_gpus = 0.0 per client, and that 0.0 is the
+# problem: it tells Ray the GPU is not a constraint, so on a 12-thread machine
+# six actors run concurrently and all six drive the GPU at once.
+#
+#   init_args.num_cpus = 2    Ray may use 2 of the 12 logical processors
+#   client-resources.num_cpus = 2    -> 2 / 2 = 1 concurrent client
+#   client-resources.num_gpus = 1.0  -> floor(1 / 1.0) = 1 concurrent client
+#
+# One at a time, so the machine stays usable during a sweep: about a sixth of
+# the logical processors and one actor on the GPU instead of three.
+#
+# It also buys something the earlier settings could not. Two runs of the same
+# seed produced different weights even with client sampling, data, partitions
+# and initial weights all verified identical, and the last difference was three
+# actors driving one GPU at once: `task.train` is bit-identical across separate
+# processes and stops being so when cuDNN kernels from several actors interleave.
+# A single concurrent client removes that interleaving.
+#
+# Concurrency changes wall-clock and, through the above, reproducibility. It
+# does not change what any client computes: each trains alone on its own
+# partition.
+options.backend.init_args.num_cpus = 2
+options.backend.client-resources.num_cpus = 2
+options.backend.client-resources.num_gpus = 1.0
+
 # Remote federation example for use with SuperLink
 [tool.flwr.federations.remote-federation]
 address = "<SUPERLINK-ADDRESS>:<PORT>"
 insecure = true  # Remove this line to enable TLS
 # root-certificates = "<PATH/TO/ca.crt>"  # For TLS setup
+
+
+# =====================================================================
+# F-UEBA configuration
+#
+# Every number here is a design decision, and every one of them is quoted or
+# implied somewhere in the thesis. They live in configuration rather than in the
+# code so that each reported figure traces back to a line you can point at.
+#
+# There are no defaults anywhere in the code. A key missing from this file stops
+# the run before training starts, with every missing key listed at once. That is
+# deliberate: a silent fallback would let a run measure something other than what
+# the configuration says it measured, which has already happened once in this
+# project and cost a full sweep.
+#
+# Constants that are not design decisions stay in the code: 1024 bytes to a
+# kilobyte, 8 bits to a byte, the varint continuation masks. Those are facts, not
+# choices, and making them configurable would only allow a misconfiguration to
+# redefine arithmetic.
+# =====================================================================
+
+[tool.fueba.experiment]
+# Seeds data partitioning, the initial model, each client's local training and
+# the evaluation splits. It does NOT control which clients a round samples: the
+# simulation framework generates client identifiers randomly per run. See the
+# reproducibility section of ieee/juri_duzeltme_listesi.md.
+seed = 42
+
+# auto, cpu or cuda. The GPU is worth roughly 3.4x here (98.7s against 334.1s on
+# the same two-round configuration), so "cpu" is a fallback rather than a free
+# way to keep the machine responsive.
+device = "auto"
+
+[tool.fueba.data]
+# Provenance only. The raw CERT r4.2 tree is read by feature_extraction.py, which
+# is the unmodified script this work inherited and carries its own DATA_PATH at
+# line 17. This entry records which corpus the processed file below came from so
+# that a result directory says what it was built on; changing it here moves
+# nothing. It is the one key in this file the pipeline does not read.
+dataset_path = "./dataset/r4.2"
+processed_data_path = "./ExtractedData/dayr4.2-percentile30.csv"
+scaler_dir = "scaler_data/{run_id}"
+global_scaler_path = "scaler_data/{run_id}/global_scaler.pkl"
+
+# Fraction of each client's windows held out for the local training loop's
+# validation loss. Note that this splits windows, which overlap by 13 of 14 days,
+# so that loss is optimistic and nothing reported depends on it.
+test_size = 0.2
+batch_size = 128
+
+is_non_iid = false
+non_iid_alpha = 0.5
+
+# What the Dirichlet draw actually skews. The two are different experiments and
+# the distinction decides whether the non-IID result means anything.
+#
+#   "quantity"  how many users a client holds. Measured on this dataset at
+#               alpha 0.5 it moves client sizes between 1 and 102 while moving
+#               their feature means 0.005 standard deviations: every client
+#               stays a random sample of the same distribution. FedAvg has no
+#               client drift to suffer from, which is why it does not degrade
+#               and why FedProx has nothing to correct.
+#   "role"      which organisational unit a client holds. The Dirichlet is drawn
+#               per job role, the way label-skewed benchmarks draw it per class.
+#               This is the natural partition: the literature prefers one where
+#               it exists (FEMNIST by writer, Shakespeare by speaking role), and
+#               CERT ships an organisational hierarchy whose `role` survives into
+#               the processed table. It is also the partition this work already
+#               claims to model, a client standing for an organisation holding
+#               its own people.
+#   "cluster"   which behavioural group a client holds, from k-means over users.
+#               The synthetic fallback, kept because it is what one would use on
+#               a dataset with no organisational attribute. Weaker than "role"
+#               here and not reported.
+#
+# Measured, as size-weighted total variation between a client's role mixture and
+# the global one: quantity 0.301, cluster 0.433, role 0.514, role at alpha 0.1
+# 0.703. Users cannot be grouped by their mean feature vector at all, because the
+# processed data holds percentile deviations from each user's own baseline and
+# user identity explains 0.4% of their variance; "cluster" therefore profiles
+# users by mean absolute deviation instead.
+#
+# Default stays "quantity" so that every already-reported non-IID run keeps
+# describing what it actually ran.
+non_iid_mode = "quantity"
+
+# How many behavioural groups "cluster" mode splits the users into. Unused by
+# "role", which takes its groups from the data.
+non_iid_clusters = 5
+
+# How a feature value is transformed before scaling. The processed dataset holds
+# percentile deviations in [-50, +50], not raw counts.
+#   log1p_positive  clip negatives to zero, then log1p
+#   signed_log1p    keep the sign, so below-normal days stay distinguishable
+#   raw             the percentile values unchanged
+feature_transform = "log1p_positive"
+
+# Variance filter. Four of the 50 features are zero on every row; dropping them
+# takes the input from 50 to 46 and the parameter count from 450,258 to 447,694.
+drop_constant_features = false
+
+# A feature whose standard deviation falls below this is treated as constant and
+# left unscaled. Without the floor, float noise in an all-zero feature becomes a
+# divisor of about 3.3e-15 and produces z-scores around 1e15.
+constant_feature_tolerance = 1e-6
+
+# Fewest users a client must hold before its scaler statistics are accepted.
+#
+# The scaler is built from three numbers per feature per client: a count, a sum
+# and a sum of squares. Those are what a secure-sum protocol adds up, and they
+# disclose nothing about an individual as long as the cohort behind them is not
+# an individual. At a cohort of one, `sum / count` is that person's own mean.
+#
+# Measured on this dataset at 1000 users and 50 clients: the Dirichlet partition
+# at alpha = 0.5 gives a smallest client of 1 user, and 16 of the 50 hold two or
+# fewer. The IID partition never drops below 16, so this floor binds only in the
+# non-IID configuration, which is exactly where it is needed.
+#
+# 5 rather than 2, because two users can still identify each other's share by
+# subtraction. It is a floor, not a guarantee: secure aggregation is the real
+# answer and this pipeline is shaped to accept it.
+minimum_cohort_size = 5
+
+selected_features = [
+    "isweekday", "isweekend", "n_workhourallact", "n_afterhourallact",
+    "n_logon", "n_workhourlogon", "n_afterhourlogon", "logon_n-pc0", "logon_n-pc1", "logon_n-pc2",
+    "n_usb", "usb_mean_usb_dur", "usb_n-pc0", "usb_n-pc1", "usb_n-pc2", "n_workhourusb", "n_afterhourusb",
+    "n_file", "file_mean_file_len", "file_mean_file_depth", "file_mean_file_nwords", "file_n-disk0", "file_n-disk1",
+    "file_n_otherf", "file_n_compf", "file_n_phof", "file_n_docf", "file_n_txtf", "file_n_exef",
+    "n_email", "email_mean_n_des", "email_mean_n_atts", "email_n-Xemail1", "email_mean_n_exdes",
+    "email_mean_n_bccdes", "email_n-exbccmail1", "email_mean_email_size", "email_mean_email_text_slen",
+    "email_mean_email_text_nwords", "email_n-pc0", "email_n-pc1", "email_n-pc2",
+    "n_http", "http_mean_url_len", "http_mean_url_depth", "http_mean_http_c_len", "http_mean_http_c_nwords",
+    "http_n_socnetf", "http_n_cloudf", "http_n_jobf"
+]
+
+[tool.fueba.model]
+# Sliding window over one user's days. At stride 1 a user with N days yields
+# N - 13 windows, and consecutive windows share 13 of their 14 days.
+window_size = 14
+stride = 1
+
+# Width the encoder's two directions concatenate back to, and the width the
+# decoder works in. The parameter count follows from this: 450,258 at 128.
+hidden_dim = 128
+
+# Reading a window in both directions. A day is characterised by the days on
+# either side of it, so a forward-only encoder sees half the context.
+encoder_bidirectional = true
+encoder_layers = 2
+decoder_layers = 2
+
+# The bottleneck is the mechanism: a fortnight of 700 values passes through
+# `hidden_dim / bottleneck_divisor` numbers before being rebuilt. At 128 and 4
+# that is 32. Turn it off to measure what the constraint is worth.
+use_bottleneck = true
+bottleneck_divisor = 4
+
+dropout = 0.2
+
+# Noise added to the input during training only. Without it the model can learn
+# to copy its input exactly, which zeroes the reconstruction error the detector
+# depends on.
+input_noise_std = 0.02
+
+[tool.fueba.training]
+# Read by both arms of the comparison. The centralized baseline used to carry its
+# own copies of weight_decay (1e-5) and grad_clip_norm (1.0) with no stated
+# reason, which meant the two arms differed in their optimiser as well as in
+# their training regime and the comparison could not attribute the difference.
+learning_rate = 0.0008
+weight_decay = 0.0001
+
+# LSTMs over 14 steps can produce very large gradients on an outlying window;
+# unclipped, one such batch wastes the round.
+grad_clip_norm = 0.5
+
+[tool.fueba.centralized]
+# The single-machine baseline. Only what genuinely cannot apply to the federated
+# arm lives here; everything else it shares comes from [tool.fueba.training].
+#
+# 50 epochs against the federation's 50 rounds x 5 local epochs. The two are not
+# equal work and are not meant to be: the baseline answers what this model
+# reaches with all the data in one place, not what it reaches for equal compute.
+epochs = 50
+
+# Stop once validation loss has not improved for this many epochs. There is no
+# federated equivalent: the round to report is chosen afterwards by rescoring
+# every checkpoint, not by stopping training early.
+early_stopping_patience = 10
+
+# Learning-rate schedule, which the federated arm has no equivalent of because
+# no client ever trains for longer than 5 consecutive epochs. Halve on 5 epochs
+# without improvement.
+lr_schedule_factor = 0.5
+lr_schedule_patience = 5
+
+[tool.fueba.federation]
+# The aggregation rule. fedavg or fedprox.
+strategy = "fedavg"
+
+# FedProx only: weight of the proximal term that holds a client's weights near
+# the global model. 0.0 makes FedProx identical to FedAvg.
+proximal_mu = 0.01
+
+# 50 rounds is the budget every reported experiment uses. The reported MB figures
+# scale linearly with it.
+num_rounds = 50
+local_epochs = 5
+
+# Fraction sampled to train each round: 25 of 50 clients, which is what the
+# communication figures assume. Evaluation uses all clients.
+fraction_fit = 0.5
+min_fit_clients = 2
+min_available_clients = 2
+save_path = "./model_pickle"
+
+[tool.fueba.efficiency]
+# --- Uplink: what each client sends the server -----------------------------
+# Chained in order; sparsification before quantization. Available:
+# weight_sparsification (alias top_k), delta_sparsification,
+# delta_sparsification_ef, quantization.
+active_plugins = []
+
+# Fraction of the model's weights that survives sparsification. Unrelated to
+# [tool.fueba.scoring] top_k_features, which is a feature count.
+sparsification_ratio = 0.05
+
+# How surviving coordinates are written on the wire. Lossless, so this changes
+# the reported payload size and nothing else.
+#   index         4 bytes of position per surviving value
+#   bitmask       1 bit per model parameter; cheaper above density 1/32
+#   delta_varint  gaps between positions, variable length
+payload_codec = "bitmask"
+
+# Applied to the encoded payload, and to the dense baseline too so the comparison
+# is not tilted. One of none, zlib, lzma.
+entropy_coder = "zlib"
+zlib_level = 9
+lzma_preset = 6
+
+# --- Downlink: what the server broadcasts to the clients --------------------
+# The larger direction. A round sends the model to 25 clients to train and to all
+# 50 to evaluate, while only 25 upload, so leaving this uncompressed caps the
+# achievable total saving at roughly a quarter however good the uplink gets.
+#
+# Only "quantization" is available, and the empty list means fp32. Sparsification
+# cannot apply here: the server sends one identical payload to every client, and
+# a delta is only decodable by a client that holds the model it was taken
+# against. See DownlinkCodec.
+downlink_plugins = []
+
+# Lossless, so this changes the reported download size and nothing the clients
+# receive. One of none, zlib, lzma.
+downlink_entropy_coder = "zlib"
+
+[tool.fueba.scoring]
+# Stage 2: how many of the most deviant features the score focuses on. Insider
+# behaviour shows up in a few channels, not all fifty.
+top_k_features = 5
+
+# Stage 4: the score is the mean of this many highest-scoring windows. One is a
+# maximum and flags a single strange fortnight; all of them dilutes a real
+# pattern across forty windows.
+persistence_window = 3
+
+# The diversity multiplier: a feature counts as deviating above this z-score, and
+# the multiplier runs from 1.0 to 2.0 with the fraction that do.
+#
+# OFF BY DEFAULT since 2026-08-14. The stage was measured across five seeds and
+# removing it improved detection every time (+0.0078, +0.0085, +0.0167, +0.0165,
+# +0.0096; mean +0.0119). The key is kept rather than deleted so that the
+# measurement stays reproducible: `ablation-with-diversity` switches it back on,
+# which is what lets anyone re-run the comparison the thesis reports.
+diversity_threshold = 2.0
+
+# Step between windows when scanning a user.
+scan_stride = 1
+
+# Added to the reference standard deviation before dividing, so a feature with no
+# spread cannot produce an infinite z-score.
+zscore_epsilon = 1e-6
+
+# Floor under a feature's reference std, as a share of the median std of the
+# features that have any spread.
+#
+# `zscore_epsilon` was doing this job and could not: it is an absolute number
+# added to a quantity whose scale it does not know. Measured on the real
+# reference, four of the fifty features have a std near 3e-5, so `std + 1e-6`
+# amplifies them roughly thirty thousand fold, and the top-m stage then selects
+# those same four features for every user. Most runs escaped it only by luck,
+# their models being exact enough on those features to make the numerator zero
+# too. The delta runs were not exact, and scored 0.24 instead of 0.82 on a model
+# whose reconstruction loss was better than the baseline's.
+#
+# 0.01 and 0.10 gave the same PR-AUC to three decimals, so this is a guard
+# rather than a tuned parameter.
+zscore_std_floor_fraction = 0.01
+
+# The stages that run, named. An ablation removes one from this list rather than
+# setting one of four booleans false. Order here is ignored: the pipeline order
+# is fixed, because each stage consumes the previous one's output, so listing
+# them in any order describes the same scorer. A name the scorer does not know
+# stops the run instead of being skipped.
+stages = ["zscore", "topk", "persistence"]
+ablation_source = ""
+
+# Fallback reconstruction error statistics, used only when a run has none on disk.
+fallback_error_mean = 0.02
+fallback_error_std = 0.05
+
+[tool.fueba.evaluation]
+# Only every Nth round is rescored. Each checkpoint costs a full pass over all
+# 1000 users, and adjacent rounds differ too little to be worth it.
+checkpoint_stride = 2
+
+# Fraction of users used to choose the threshold and the reported round. The rest
+# are the test half, which selection never touches.
+validation_fraction = 0.5
+
+# Which users land in which half. Deliberately NOT the run seed.
+#
+# It used to be the run seed, so every seed reported on a different set of 35
+# insiders. Measured: scoring one unchanged model against twenty different splits
+# gives a standard deviation of 0.0548 and a range of 0.75 to 0.91. Two runs of
+# the same configuration at seeds 1 and 2 differed by 0.0952 on their own splits
+# and by 0.0069 on any shared one, so essentially all of that gap was the split.
+#
+# That noise is larger than everything the thesis measures: compression costs
+# between 0.01 and 0.13, the diversity multiplier 0.006. Averaging over seeds does
+# not fix it either, since 0.0548 over five seeds is still 0.024.
+#
+# Fixing it here keeps the property that matters, which is that selection only
+# ever reads the validation half, and removes the part that was pure nuisance.
+# Every run now reports on the same test users, so runs are paired and their
+# differences reflect the model. The luck of this one split remains, and the
+# bootstrap interval over users is where it is expressed.
+split_seed = 42
+
+# Convergence, reported two ways because they answer different questions.
+convergence_peak_fraction = 0.95
+plateau_tolerance = 0.005
+
+# How many final rounds the reported metric averages over (Y5).
+#
+# The reported number used to come from the single round with the best validation
+# PR-AUC. After round 6 the validation curve is flat with a standard deviation
+# around 0.005, so that argmax was choosing between rounds that are not really
+# different, and it was choosing the luckiest one. Measured, the gift was not the
+# same for every arm: +0.0032 for the baseline against +0.008 to +0.020 for the
+# sparse arms, whose validation curves are four times noisier. A selection rule
+# that rewards the noisy arms more is a rule that flatters this thesis's own
+# claim, which is the hardest thing to defend.
+#
+# Averaging the last 20 rounds removes it. Twenty rather than ten because
+# checkpoint_stride is 2, so this is ten scored rounds rather than five; and
+# rather than "every round after convergence" because the arms do not converge in
+# the same place, and a window that starts early would include the climbing
+# rounds of the slow arms only. Every arm is measured over the same window, and
+# the window answers the question a communication paper is actually asked: after
+# paying for the whole round budget, what do you get?
+plateau_window_rounds = 20
+
+# Bootstrap confidence interval over users within one run.
+bootstrap_iterations = 1000
+bootstrap_confidence = 0.95
+
+
+# =====================================================================
+# What a plain `run_sweep` runs.
+#
+# This list exists because the default used to be "every experiment defined
+# below except the smoke tests", which had grown to 29 configurations and about
+# 70 hours. Most of those were exploratory: they answered a question once and
+# then stayed in the sweep, costing hours on every re-run and, worse, adding a
+# result the thesis has to defend. The jury's own rule was that no question may
+# be met with "I don't remember" a second time, and every extra configuration is
+# one more question.
+#
+# So the list below is the set the thesis reports, nothing else. Everything not
+# named here is still defined, still runnable, and still tested; it is simply not
+# swept by default:
+#
+#   python federated_insider_detection.py --experiment all --only delta-ef-0.1
+#
+# Leaving this list empty restores the old behaviour of sweeping everything.
+# =====================================================================
+
+[tool.fueba.sweep]
+experiments = [
+    # The reference every other row is read against.
+    "baseline",
+
+    # Sparsification, two methods at two ratios. The comparison is the point:
+    # `top-k-*` sparsifies the weights and erodes the global model (59% of it is
+    # exactly zero at ratio 0.1), `delta-*` sparsifies the update and does not.
+    # Both are reported, the first as a documented negative result.
+    "delta-0.1", "delta-0.05",
+    "top-k-0.1", "top-k-0.05",
+
+    # Quantization, and the combined configuration J12's table needs.
+    "quantization-fp16",
+    "top-k-0.1-quant-fp16",
+
+    # The downlink is three quarters of the traffic, so these are the
+    # configurations where the total saving approaches what the title claims.
+    # The second one is the thesis's own recommendation finally measured with
+    # both directions compressed; without it delta is reported at 24.2% against
+    # weight sparsification's 73.9% purely because nothing touched its downlink.
+    "bidirectional-fp16",
+    "delta-0.05-downlink-fp16",
+
+    # J18: the non-IID setting and the one alternative aggregation rule. Two
+    # pairs, because they test different things. The first skews how much data a
+    # client holds, which measurably does not move the client distributions and
+    # so cannot challenge FedAvg; the second skews which kind of user a client
+    # holds, which does. Size-weighted cluster-mixture divergence from the global
+    # mixture: 0.119 for the first, 0.434 for the second at the same alpha.
+    "non-iid-baseline",
+    "fedprox-non-iid",
+    "role-non-iid-baseline",
+    "role-fedprox-non-iid",
+
+    # The IID control for FedProx, added 2026-08-10. Four seeds put
+    # `fedprox-non-iid` at 0.8926 on the test half against 0.8801 for the IID
+    # FedAvg baseline: the proximal term appears to help under quantity skew,
+    # where the measured client drift is essentially zero and it therefore has
+    # nothing to correct. That points at the penalty acting as a regulariser
+    # toward the global model rather than as a drift correction, and this run is
+    # what separates the two readings. Without it the non-IID chapter has an
+    # observation it cannot explain; with it the claim is either controlled or
+    # withdrawn.
+    "fedprox-baseline",
+
+    # J5 and J13: feature selection, and the round/epoch trade.
+    "features-filtered",
+    "rounds-25-epochs-10",
+
+    # Why the federated arm trails the centralised one. Fewer clients means more
+    # data each: 5,900 windows per client at 50, 29,502 at 10, against 295,023
+    # for the centralised model that trains on all of it. Single-seed runs put
+    # PR-AUC at 0.8315, 0.8484 and 0.9296 for 50, 20 and 10 clients, with the
+    # centralised model at 0.9468, which reads as one trend rather than three
+    # results. Returned to the sweep so the claim rests on more than one seed.
+    #
+    # The trend is confounded and the thesis has to say so: `fraction_fit` stays
+    # at 0.5, so ten clients also means five sampled per round instead of
+    # twenty-five, and less averaging is a second reason a round could improve.
+    # Separating the two needs a run that scales the fraction with the client
+    # count, which is not in this list.
+    "nodes-20",
+    "nodes-10",
+
+    # J10: the scoring stages, each removed in turn. These rescore
+    # `ablation-full`'s weights rather than training, so they cost minutes.
+    # `ablation-with-diversity` is the odd one out: it adds a stage back, which
+    # is how the multiplier removed on 2026-08-14 stays measurable.
+    "ablation-full",
+    "ablation-no-zscore", "ablation-no-topk", "ablation-no-persistence",
+    "ablation-with-diversity",
+
+    # J7: the two architecture choices the jury asked us to justify. Unlike the
+    # scoring ablations above these retrain, because the weights they question
+    # are the weights themselves.
+    "encoder-unidirectional",
+    "no-bottleneck",
+]
+
+
+# =====================================================================
+# Experiments. Each one is an override on the sections above; anything it does
+# not mention keeps the value defined there.
+#
+# Names are quoted because several contain dots, which TOML would otherwise read
+# as table nesting.
+# =====================================================================
+
+[tool.fueba.experiments."smoke-test"]
+efficiency.active_plugins = ["delta_sparsification_ef", "quantization"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = false
+federation.num_rounds = 2
+federation.num_supernodes = 6
+
+# Same size as smoke-test, with the downlink quantized. Both directions get
+# compressed here, which is what makes it worth keeping: the downlink path runs
+# through Flower's configure_fit and configure_evaluate rather than through the
+# client, so a unit test on the codec alone would not exercise it.
+[tool.fueba.experiments."smoke-test-downlink"]
+efficiency.active_plugins = ["quantization"]
+efficiency.downlink_plugins = ["quantization"]
+data.is_non_iid = false
+federation.num_rounds = 2
+federation.num_supernodes = 6
+
+# FedProx end to end. The proximal term is applied inside the client's training
+# loop from a value the strategy sends down, so nothing short of a real round
+# exercises the whole path.
+[tool.fueba.experiments."smoke-test-fedprox"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+federation.strategy = "fedprox"
+federation.num_rounds = 2
+federation.num_supernodes = 6
+
+[tool.fueba.experiments."baseline"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+
+[tool.fueba.experiments."top-k-0.05"]
+efficiency.active_plugins = ["top_k"]
+efficiency.sparsification_ratio = 0.05
+data.is_non_iid = false
+
+[tool.fueba.experiments."top-k-0.1"]
+efficiency.active_plugins = ["top_k"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = false
+
+[tool.fueba.experiments."quantization-fp16"]
+efficiency.active_plugins = ["quantization"]
+data.is_non_iid = false
+
+[tool.fueba.experiments."top-k-0.1-quant-fp16"]
+efficiency.active_plugins = ["top_k", "quantization"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = false
+
+# --- Downlink compression --------------------------------------------------
+# The downlink is roughly three quarters of the traffic, so these measure the
+# direction the uplink experiments above cannot reach. "downlink-fp16" isolates
+# it; "bidirectional-fp16" and "bidirectional-top-k-0.1-fp16" are the combined
+# configurations, which is where the total saving is actually decided.
+
+[tool.fueba.experiments."downlink-fp16"]
+efficiency.active_plugins = []
+efficiency.downlink_plugins = ["quantization"]
+data.is_non_iid = false
+
+[tool.fueba.experiments."bidirectional-fp16"]
+efficiency.active_plugins = ["quantization"]
+efficiency.downlink_plugins = ["quantization"]
+data.is_non_iid = false
+
+[tool.fueba.experiments."bidirectional-top-k-0.1-fp16"]
+efficiency.active_plugins = ["top_k", "quantization"]
+efficiency.sparsification_ratio = 0.1
+efficiency.downlink_plugins = ["quantization"]
+data.is_non_iid = false
+
+# Delta sparsification with the downlink compressed too. Added 2026-08-12.
+#
+# The thesis argues delta sparsification is the method to use and weight
+# sparsification is the documented negative result, but on total traffic the
+# table reads the other way round: 24.2% for delta against 73.9% for
+# `top-k-0.1-quant-fp16`. That gap is not a property of the method. Delta already
+# uploads less than the weight variant does (123.7 MB against 125.9); it looks
+# worse only because nothing compresses the downlink, which is three quarters of
+# the traffic. Without this run the thesis reports its own recommendation in an
+# incomplete configuration, and a jury reading the total-saving column would be
+# right to ask why.
+#
+# Estimated at roughly 61% total: 123.7 MB up, the ~5955 MB down halved by fp16.
+# Delta's measured detection cost is -0.0042 on the test half, inside the noise,
+# so the expected result is the best honest trade-off in the table.
+#
+# Deliberately no quantization on the uplink. The uplink is already 6% of the
+# baseline, and adding a second lossy step there would blur what this run is for:
+# it asks one question, which is where delta lands once the dominant direction is
+# compressed.
+[tool.fueba.experiments."delta-0.05-downlink-fp16"]
+efficiency.active_plugins = ["delta_sparsification"]
+efficiency.sparsification_ratio = 0.05
+efficiency.downlink_plugins = ["quantization"]
+data.is_non_iid = false
+
+# --- Aggregation rule -------------------------------------------------------
+# FedProx against FedAvg. Its penalty targets client drift, which is what long
+# local training under a heterogeneous partition causes, so the non-IID pair is
+# the one that can show a difference; the IID pair is the control that says
+# whether the penalty costs anything when there is no drift to correct.
+
+[tool.fueba.experiments."fedprox-baseline"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+federation.strategy = "fedprox"
+
+[tool.fueba.experiments."fedprox-non-iid"]
+efficiency.active_plugins = []
+data.is_non_iid = true
+data.non_iid_alpha = 0.5
+federation.strategy = "fedprox"
+
+[tool.fueba.experiments."non-iid-baseline"]
+efficiency.active_plugins = []
+data.is_non_iid = true
+data.non_iid_alpha = 0.5
+federation.num_rounds = 50
+
+# The pair that actually tests the literature's claim about FedAvg. The runs
+# above skew how much data a client has; these skew what kind, so a client
+# trains on a population the next one barely sees. If FedAvg degrades anywhere
+# in this work it is here, and if it does then FedProx has something to correct.
+[tool.fueba.experiments."role-non-iid-baseline"]
+efficiency.active_plugins = []
+data.is_non_iid = true
+data.non_iid_alpha = 0.5
+data.non_iid_mode = "role"
+
+[tool.fueba.experiments."role-fedprox-non-iid"]
+efficiency.active_plugins = []
+data.is_non_iid = true
+data.non_iid_alpha = 0.5
+data.non_iid_mode = "role"
+federation.strategy = "fedprox"
+
+[tool.fueba.experiments."non-iid-top-k-0.1-quant-fp16"]
+efficiency.active_plugins = ["top_k", "quantization"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = true
+data.non_iid_alpha = 0.5
+federation.num_rounds = 50
+
+[tool.fueba.experiments."nodes-20"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+federation.num_rounds = 50
+federation.num_supernodes = 20
+
+[tool.fueba.experiments."nodes-10"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+federation.num_rounds = 50
+federation.num_supernodes = 10
+
+[tool.fueba.experiments."ablation-full"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+scoring.ablation_source = "baseline"
+
+[tool.fueba.experiments."ablation-no-zscore"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+scoring.ablation_source = "baseline"
+scoring.stages = ["topk", "persistence"]
+
+[tool.fueba.experiments."ablation-no-topk"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+scoring.ablation_source = "baseline"
+scoring.stages = ["zscore", "persistence"]
+
+[tool.fueba.experiments."ablation-no-persistence"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+scoring.ablation_source = "baseline"
+scoring.stages = ["zscore", "topk"]
+
+# The one arm that ADDS a stage rather than removing one. It is how the removed
+# diversity multiplier stays measurable: `ablation-full` is the pipeline as
+# shipped, and the difference between the two is the multiplier's contribution.
+# Deleting the multiplier instead would have made that number unreproducible.
+[tool.fueba.experiments."ablation-with-diversity"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+scoring.ablation_source = "baseline"
+scoring.stages = ["zscore", "topk", "diversity", "persistence"]
+
+[tool.fueba.experiments."delta-0.1"]
+efficiency.active_plugins = ["delta_sparsification"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = false
+
+[tool.fueba.experiments."delta-0.05"]
+efficiency.active_plugins = ["delta_sparsification"]
+efficiency.sparsification_ratio = 0.05
+data.is_non_iid = false
+
+[tool.fueba.experiments."delta-ef-0.1"]
+efficiency.active_plugins = ["delta_sparsification_ef"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = false
+
+[tool.fueba.experiments."delta-ef-0.05"]
+efficiency.active_plugins = ["delta_sparsification_ef"]
+efficiency.sparsification_ratio = 0.05
+data.is_non_iid = false
+
+[tool.fueba.experiments."delta-ef-0.1-quant-fp16"]
+efficiency.active_plugins = ["delta_sparsification_ef", "quantization"]
+efficiency.sparsification_ratio = 0.1
+data.is_non_iid = false
+
+[tool.fueba.experiments."rounds-25-epochs-10"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+federation.num_rounds = 25
+federation.local_epochs = 10
+
+[tool.fueba.experiments."rounds-10-epochs-25"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+federation.num_rounds = 10
+federation.local_epochs = 25
+
+[tool.fueba.experiments."transform-signed"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+data.feature_transform = "signed_log1p"
+
+[tool.fueba.experiments."transform-raw"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+data.feature_transform = "raw"
+
+[tool.fueba.experiments."features-filtered"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+data.drop_constant_features = true
+
+# --- Architecture ablations (J7), added 2026-08-10 ------------------------------
+# The jury's objection to J7 was that the architecture was described but not
+# justified, and until now the two choices it asks about had never been measured:
+# `encoder_bidirectional` and `use_bottleneck` were declared, overridable, and
+# left at their defaults by every experiment. Argument and citation can defend a
+# design; only these two runs can say what it is worth.
+#
+# Both keys were verified to change the model rather than only the record:
+#
+#   baseline                          encoder 158,720   bottleneck 20,896   450,258 params
+#   encoder_bidirectional = false     encoder 224,256   bottleneck 20,896   515,794 params
+#   use_bottleneck = false            encoder 158,720   bottleneck none     429,362 params
+#
+# Note the direction of the first one. The encoder's width is per direction
+# (`hidden_dim // encoder_directions`), so switching bidirectionality off widens
+# each direction from 64 to 128 and leaves the latent vector at 128 either way.
+# The unidirectional arm therefore carries 15% MORE parameters than the
+# bidirectional one, and the decoder is untouched. That is deliberate: it isolates
+# the second reading direction instead of also shrinking the network, so a loss
+# here cannot be explained away as reduced capacity. It does mean this arm's
+# payload is 1.9676 MB against 1.7176, which has to be said wherever its
+# communication figures appear.
+
+[tool.fueba.experiments."encoder-unidirectional"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+model.encoder_bidirectional = false
+
+[tool.fueba.experiments."no-bottleneck"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+model.use_bottleneck = false
