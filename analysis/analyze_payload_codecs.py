@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
 import glob
+import re
 import os
 import pickle
 import sys
@@ -37,6 +38,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
+from config_manager import config
 from federated_ueba import payload_codecs as pc
 from federated_ueba.efficiency_plugins import WeightSparsificationPlugin
 
@@ -53,7 +55,9 @@ COMBINATIONS = [
 
 
 def find_checkpoint():
-    """A *dense* saved global model.
+    """A *dense* saved global model *of the configured architecture*.
+
+    Two things have to hold and only one of them is about density.
 
     The starting point has to be dense. A checkpoint from a sparsifying run
     already has most of its weights at zero, so asking for the top 10% of it
@@ -61,15 +65,64 @@ def find_checkpoint():
     silently collapses onto the sparser configuration's numbers. Runs whose name
     implies sparsification are therefore skipped, and whatever is chosen is
     density-checked by the caller.
+
+    The starting point also has to be the *proposed* model. This function used to
+    take the middle element of a sorted glob, which was fine while `model_pickle`
+    held a handful of runs and stopped being fine as the sweep grew: the middle
+    drifted onto `no-bottleneck`, an ablation carrying 429,362 parameters in 26
+    tensors instead of the proposed 450,258 in 36. Nothing failed. The payload
+    table simply described a different model, and the only trace was the
+    parameter count in the printed header. The preference order below is
+    explicit, and `check_architecture` turns the remaining risk into an error.
     """
     sparse_markers = ("top-k", "delta-", "sparsif")
-    for pattern in ("model_pickle/*__seed*/parameters_round_*.pkl",
-                    "model_pickle/*/parameters_round_*.pkl"):
-        found = [p for p in sorted(glob.glob(pattern))
-                 if not any(m in p.replace("\\", "/").lower() for m in sparse_markers)]
+    ablation_markers = ("ablation", "no-bottleneck", "unidirectional",
+                        "features-filtered", "nodes-")
+    patterns = ("model_pickle/baseline__seed*/parameters_round_*.pkl",
+                "model_pickle/baseline*/parameters_round_*.pkl",
+                "model_pickle/*__seed*/parameters_round_*.pkl",
+                "model_pickle/*/parameters_round_*.pkl")
+    def round_number(path):
+        match = re.search(r"parameters_round_(\d+)", path)
+        return int(match.group(1)) if match else -1
+
+    for pattern in patterns:
+        found = [p for p in glob.glob(pattern)
+                 if not any(m in p.replace("\\", "/").lower()
+                            for m in sparse_markers + ablation_markers)]
         if found:
-            return found[len(found) // 2]
+            # The last *round*, not the last string: sorted() puts round_9 after
+            # round_50 and would hand back an early, under-trained checkpoint.
+            return max(sorted(found), key=round_number)
     return None
+
+
+def check_architecture(weights):
+    """Refuse a checkpoint that is not the configured architecture.
+
+    The payload sizes are a function of the parameter count and of how those
+    parameters are split into tensors, because sparsification selects per tensor.
+    Measuring the wrong model therefore produces a plausible table rather than an
+    error, which is the failure this guard exists to prevent.
+    """
+    from federated_ueba.task import LSTMAutoencoder, Architecture
+
+    arch = Architecture.from_config(config)
+    n_features = len(config.get("data", "selected_features"))
+    reference = LSTMAutoencoder(n_features, arch=arch)
+    want_params = sum(p.numel() for p in reference.parameters()
+                      if p.requires_grad)
+    want_tensors = len([p for p in reference.parameters() if p.requires_grad])
+
+    got_params = sum(a.size for a in weights)
+    got_tensors = len(weights)
+    if (got_params, got_tensors) != (want_params, want_tensors):
+        raise SystemExit(
+            f"Checkpoint carries {got_params:,} parameters in {got_tensors} "
+            f"tensors; the configured architecture has {want_params:,} in "
+            f"{want_tensors}. Payload sizes measured here would describe a "
+            f"different model. Pass --checkpoint pointing at a run of the "
+            f"configured architecture.")
 
 
 def load_weights(path):
@@ -178,6 +231,7 @@ def main():
 
     print(f"Checkpoint: {checkpoint}\n")
     weights = load_weights(checkpoint)
+    check_architecture(weights)
     df, dense_bytes = measure(weights)
     gains_df = report(df, dense_bytes, sum(a.size for a in weights))
 

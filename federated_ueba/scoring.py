@@ -425,8 +425,10 @@ def split_users(users, labels, seed=42, validation_fraction=0.5):
     `analysis/compare_experiments.py` did not, and so was an interval around a
     quantity other than the one it was printed beside.
 
-    Deterministic in `seed`, which is the run seed, so it can be reproduced from
-    a finished run's per-user CSV without re-scoring anything.
+    Deterministic in `seed`. Callers pass `ScoringConfig.split_seed`, which is
+    fixed across runs and is not the run seed; see that field for why. The split
+    can therefore be reproduced from a finished run's per-user CSV without
+    re-scoring anything.
     """
     # Stratified so both halves hold a comparable share of the 70 insiders.
     # Without it a split could leave one half with almost none of them and make

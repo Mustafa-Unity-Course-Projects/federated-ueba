@@ -186,10 +186,29 @@ def pr_auc(labels, scores):
     """PR-AUC over every evaluated user, insiders and non-insiders alike.
 
     Deliberately the whole population rather than one half of the user split.
-    The two halves are complementary draws from 35 insiders, so a half that gets
-    the hard cases makes the other half easy; measured across five baseline
-    seeds their correlation is -0.955 and each half carries sd ~0.048 while the
-    union carries 0.008. The union is the stable quantity.
+
+    The original reason no longer applies and is recorded because the number is
+    quoted elsewhere. While the split followed the run seed, the two halves were
+    complementary draws from 35 insiders: a half that got the hard cases made the
+    other half easy, so across five baseline seeds they correlated -0.950, each
+    half carried sd ~0.05 and the union 0.007. With `split_seed` fixed every run
+    reports on the same halves and that source of variance is gone; measured on
+    the same five seeds the halves now carry 0.0065 and 0.0069 against the
+    union's 0.0069.
+
+    What survives is bias rather than variance. The fixed test half is easier
+    than the whole population and the easiness does not fall equally on the two
+    arms. Measured with the round chosen on the validation half in *both* arms
+    and only the reporting population varied, the cost of federation is 0.0908
+    on the test half against 0.1198 on all 1000 users. Reporting on the union is
+    what keeps that from being understated.
+
+    An earlier note here read 0.0921 and 0.1270. Those came from a mixed rule:
+    the centralized arm at its validation-best epoch against the federated arm's
+    last-twenty-round mean, which is not a population comparison at all. Under a
+    genuinely fixed rule the whole-population figure is 0.1198, the same number
+    the thesis reports in 5.5.2; with both arms read as a last-twenty mean it is
+    0.1171. Corrected 26 August 2026.
     """
     return float(average_precision_score(labels, scores))
 

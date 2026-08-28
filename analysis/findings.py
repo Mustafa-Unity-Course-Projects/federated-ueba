@@ -61,10 +61,18 @@ BASELINE = "baseline"
 EQUIVALENCE = "esdeger"    # the claim is "no meaningful loss"
 SUPERIORITY = "ustun"      # the claim is "measurably better"
 
-# How large a loss the thesis is willing to call negligible. 0.02 PR-AUC, which
-# is about 2.4 times the baseline's own across-seed spread (sd 0.0083) and
-# smaller than the range five baseline seeds covered on their own (0.0224). A
-# difference under it cannot be separated from rerunning the same configuration.
+# A scale for "how large a loss would still be negligible", not a pass/fail gate.
+# 0.02 PR-AUC is about three times the baseline's own across-seed spread (sd
+# 0.0069 over five seeds) and a little above the range those five seeds covered
+# (0.0194), so a difference under it cannot be separated from rerunning the same
+# configuration.
+#
+# Do not read the verdict it produces as a decision when the interval's endpoint
+# lands near the margin. Endpoints carry their own Monte Carlo uncertainty of
+# roughly 0.001, and three reported arms sit within 0.002 of the boundary: their
+# verdict flips with the bootstrap seed even though the interval itself
+# reproduces exactly at the default one. The thesis reports the interval and what
+# it fails to rule out; `esdeger` here is a summary label, not the claim.
 DEFAULT_MARGIN = 0.02
 
 # The results chapter, as comparisons. A is the configuration being argued for.
@@ -91,6 +99,20 @@ CLAIMS = [
      "non-IID bolunme tespiti dusurmuyor"),
     ("fedprox-non-iid", "non-iid-baseline", SUPERIORITY,
      "FedProx non-IID altinda FedAvg'den iyi"),
+    # The second form of heterogeneity. Dirichlet skews how much data a client
+    # holds; this skews what is in it. Note what the partition does and does not
+    # do: it draws a separate Dirichlet per job role and splits that role's
+    # members across clients, the way label-skewed benchmarks draw one per class.
+    # No client ends up holding a single role. Measured over five seeds, a client
+    # holds 9.9 roles on average and none holds one, while the size-weighted
+    # total variation between a client's role mixture and the global one reaches
+    # 0.537 against quantity skew's 0.311. See analysis/partition_skew.py.
+    ("role-non-iid-baseline", BASELINE, EQUIVALENCE,
+     "role gore bolumleme tespiti dusurmuyor"),
+    ("role-non-iid-baseline", "non-iid-baseline", EQUIVALENCE,
+     "role gore bolumleme, miktar carpikligindan kotu degil"),
+    ("role-fedprox-non-iid", "role-non-iid-baseline", SUPERIORITY,
+     "FedProx role gore bolumlemede FedAvg'den iyi"),
     ("features-filtered", BASELINE, EQUIVALENCE,
      "sabit oznitelikleri atmak zarar vermiyor"),
     ("rounds-25-epochs-10", BASELINE, EQUIVALENCE,
