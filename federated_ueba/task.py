@@ -79,6 +79,7 @@ class Architecture:
     encoder_layers: int
     decoder_layers: int
     encoder_bidirectional: bool
+    encoder_hidden_override: int
     use_bottleneck: bool
     bottleneck_divisor: int
     dropout: float
@@ -93,6 +94,8 @@ class Architecture:
             encoder_layers=source.get("model", "encoder_layers"),
             decoder_layers=source.get("model", "decoder_layers"),
             encoder_bidirectional=source.get("model", "encoder_bidirectional"),
+            encoder_hidden_override=source.get("model",
+                                               "encoder_hidden_override"),
             use_bottleneck=source.get("model", "use_bottleneck"),
             bottleneck_divisor=source.get("model", "bottleneck_divisor"),
             dropout=source.get("model", "dropout"),
@@ -112,8 +115,27 @@ class Architecture:
         network at one consistent width regardless of this switch: the latent
         vector is hidden_dim wide either way, so the bottleneck and the decoder
         do not have to change shape when the encoder becomes unidirectional.
+
+        `encoder_hidden_override` breaks that tie on purpose, and exists for one
+        measurement. Switching bidirectionality off widens the single direction
+        from 64 to 128, so the unidirectional arm carries *more* parameters than
+        the bidirectional one. That is the right control for a loss, which could
+        then not be blamed on capacity, but it is a weak control for the null
+        that was actually measured: a real contribution from the backward pass
+        could be masked by the 65,536 parameters the switch adds. Pinning the
+        per-direction width instead removes the backward pass and nothing else.
         """
-        return self.hidden_dim // self.encoder_directions
+        return (self.encoder_hidden_override or
+                self.hidden_dim // self.encoder_directions)
+
+    @property
+    def latent_dim(self):
+        """Width of the vector the encoder hands to the bottleneck.
+
+        Equal to hidden_dim whenever the override is off, which is what the
+        decoder assumes and what every reported run before this field used.
+        """
+        return self.encoder_hidden_per_direction * self.encoder_directions
 
     @property
     def bottleneck_width(self):
@@ -188,8 +210,11 @@ class LSTMAutoencoder(nn.Module):
         if arch.use_bottleneck:
             wide, narrow = arch.hidden_dim, arch.bottleneck_width
             middle = arch.hidden_dim // 2
+            # In goes whatever the encoder produced, out goes hidden_dim: the
+            # bottleneck is the one place a narrowed encoder is absorbed, so the
+            # decoder never has to know the encoder's width.
             self.bottleneck = nn.Sequential(
-                nn.Linear(wide, middle),
+                nn.Linear(arch.latent_dim, middle),
                 nn.LayerNorm(middle),
                 nn.ReLU(),
                 nn.Linear(middle, narrow),   # the narrowest point
@@ -198,6 +223,17 @@ class LSTMAutoencoder(nn.Module):
                 nn.ReLU(),
                 nn.Linear(middle, wide)
             )
+        elif arch.latent_dim != arch.hidden_dim:
+            # Identity passes the encoder's width straight to a decoder built for
+            # hidden_dim. Without the bottleneck there is nothing left to absorb
+            # the difference, so this combination cannot be built. Refused here
+            # rather than surfacing as a shape error inside the first forward
+            # pass of a run that has already started training.
+            raise ValueError(
+                f"encoder_hidden_override={arch.encoder_hidden_override} gives a "
+                f"latent of {arch.latent_dim}, but use_bottleneck is off and the "
+                f"decoder expects {arch.hidden_dim}. The bottleneck is what "
+                f"reconciles the two widths.")
         else:
             self.bottleneck = nn.Identity()
 

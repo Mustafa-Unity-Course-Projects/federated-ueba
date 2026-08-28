@@ -16,8 +16,8 @@ license = "Apache-2.0"
 dependencies = [
     "flwr[simulation]>=1.22.0",
     "flwr-datasets[vision]>=0.5.0",
-    "torch==2.7.1",
-    "torchvision==0.22.1",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
     "scikit-learn",
 ]
 
@@ -224,6 +224,12 @@ hidden_dim = 128
 encoder_bidirectional = true
 encoder_layers = 2
 decoder_layers = 2
+
+# Width of one encoder direction. 0 derives it as `hidden_dim // directions`,
+# which is what keeps the latent vector hidden_dim wide however the direction
+# switch is set. Setting it decouples the encoder's width from the rest of the
+# network, and exists for `encoder-unidirectional-64`; see that experiment.
+encoder_hidden_override = 0
 
 # The bottleneck is the mechanism: a fortnight of 700 values passes through
 # `hidden_dim / bottleneck_divisor` numbers before being rebuilt. At 128 and 4
@@ -538,6 +544,7 @@ experiments = [
     # scoring ablations above these retrain, because the weights they question
     # are the weights themselves.
     "encoder-unidirectional",
+    "encoder-unidirectional-64",
     "no-bottleneck",
 ]
 
@@ -820,6 +827,61 @@ data.drop_constant_features = true
 efficiency.active_plugins = []
 data.is_non_iid = false
 model.encoder_bidirectional = false
+
+# The complement of the arm above, added 2026-08-20. Same switch, but the
+# per-direction width is pinned at 64 instead of being allowed to double, so the
+# encoder loses the backward pass and nothing else:
+#
+#   encoder-unidirectional        encoder 224,256   latent 128   515,794 params
+#   encoder-unidirectional-64     encoder  62,976   latent  64   350,418 params
+#
+# Why both are needed. Widening the single direction is the right control for a
+# *loss*, which then cannot be blamed on reduced capacity. It is a weak control
+# for the *null* that was actually measured (-0.0025, [-0.0187, +0.0162]),
+# because a real contribution from the backward pass could be masked by the
+# 65,536 parameters the switch adds. This arm cannot mask anything: it is
+# smaller. Together the two bracket the question at 350k, 450k and 516k
+# parameters, in both direction settings.
+#
+# Its payload is 1.3367 MB against the baseline's 1.7176, so its communication
+# figures are not comparable with the rest of the table and that has to be said
+# wherever they appear. The same note already applies to the arm above.
+#
+# Measured 2026-08-24, five seeds: PR-AUC 0.8401 (sd 0.0048) against the
+# baseline's 0.8371 (sd 0.0069), paired difference -0.0034 with [-0.0222,
+# +0.0150]. Indistinguishable, and the masking worry above is answered: the null
+# survives at 78% of the baseline's parameters, so it cannot be an artefact of
+# the capacity the wider arm adds. Against `encoder-unidirectional` alone, which
+# isolates latent width at fixed direction, -0.0011 with [-0.0160, +0.0113].
+# Note what this arm does NOT isolate: relative to the baseline it drops the
+# backward pass AND halves the latent, so it is not a single-variable ablation.
+# The cell that would separate them is `encoder-bidirectional-64`, unrun.
+[tool.fueba.experiments."encoder-unidirectional-64"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+model.encoder_bidirectional = false
+model.encoder_hidden_override = 64
+
+# The fourth cell. With this arm the two switches form a 2x2, latent width
+# against direction, and the `-64` suffix means the latent width in both new
+# arms (bidirectional reaches 64 with 32 per direction, unidirectional with 64):
+#
+#                    latent 128                     latent 64
+#   bidirectional    baseline           450,258     this arm      334,034
+#   unidirectional   -unidirectional    515,794     -unidirectional-64  350,418
+#
+# Why it is worth a run. Direction can currently only be compared along the top
+# row, where the two arms differ by 65,536 parameters, that is 14.6%. The bottom
+# row differs by 16,384, that is 4.7%, so it separates direction from capacity
+# roughly three times more sharply. The columns then read as a width effect at
+# fixed direction, which nothing in the thesis measures yet.
+#
+# Note the pattern repeats: bidirectional is again the cheaper way to reach a
+# given latent width, because each direction is half as wide.
+[tool.fueba.experiments."encoder-bidirectional-64"]
+efficiency.active_plugins = []
+data.is_non_iid = false
+model.encoder_hidden_override = 32
 
 [tool.fueba.experiments."no-bottleneck"]
 efficiency.active_plugins = []

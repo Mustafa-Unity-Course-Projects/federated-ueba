@@ -27,6 +27,12 @@ from federated_ueba import task
 # is this number times 4 bytes, so a change here invalidates all of them.
 REPORTED_PARAMETER_COUNT = 450_258
 
+# The two architecture ablations that retrain. Pinned because each one's payload
+# differs from the baseline's and its communication figures are read against that
+# size: 1.9676 MB and 1.3367 MB against 1.7176.
+UNIDIRECTIONAL_COUNT = 515_794          # encoder-unidirectional
+NARROW_UNIDIRECTIONAL_COUNT = 350_418   # encoder-unidirectional-64
+
 INPUT_DIM = 50
 
 
@@ -92,8 +98,35 @@ class TestSwitchesChangeTheModel(unittest.TestCase):
     def test_a_unidirectional_encoder_is_a_different_model(self):
         """Larger, not smaller: one direction at the full width beats two at half."""
         arch = replace(self.arch, encoder_bidirectional=False)
+        self.assertEqual(parameter_count(build(arch)), UNIDIRECTIONAL_COUNT)
         self.assertGreater(parameter_count(build(arch)), self.baseline)
         self.assert_differs_and_still_reconstructs(arch)
+
+    def test_pinning_the_encoder_width_removes_the_backward_pass_alone(self):
+        """`encoder-unidirectional-64`, the complement of the arm above.
+
+        The arm above grows because one direction widens to the full hidden_dim.
+        This one holds the per-direction width at what the bidirectional encoder
+        already used, so the only thing the switch removes is the second reading
+        direction, and the model gets smaller instead of larger.
+        """
+        arch = replace(self.arch, encoder_bidirectional=False,
+                       encoder_hidden_override=64)
+        self.assertEqual(arch.encoder_hidden_per_direction, 64)
+        self.assertEqual(arch.latent_dim, 64)
+        self.assertEqual(parameter_count(build(arch)), NARROW_UNIDIRECTIONAL_COUNT)
+        self.assertLess(parameter_count(build(arch)), self.baseline)
+        self.assert_differs_and_still_reconstructs(arch)
+
+    def test_a_narrowed_encoder_needs_the_bottleneck_to_absorb_it(self):
+        """Identity would hand a 64-wide latent to a decoder built for 128.
+
+        A shape error several minutes into training is the failure this replaces.
+        """
+        arch = replace(self.arch, encoder_bidirectional=False,
+                       encoder_hidden_override=64, use_bottleneck=False)
+        with self.assertRaises(ValueError):
+            build(arch)
 
     def test_layer_counts_change_the_model(self):
         self.assert_differs_and_still_reconstructs(
@@ -112,15 +145,25 @@ class TestArchitectureInvariants(unittest.TestCase):
         self.arch = task.Architecture.from_config(config)
 
     def test_the_latent_stays_hidden_dim_wide_in_both_directions_settings(self):
-        """Why the decoder does not have to be resized when the encoder changes."""
+        """Why the decoder does not have to be resized when the encoder changes.
+
+        Holds whenever `encoder_hidden_override` is off, which is every reported
+        run except `encoder-unidirectional-64`. That arm sets the override
+        precisely to break this invariant, and the bottleneck absorbs the
+        difference so the decoder still does not have to know.
+        """
+        self.assertEqual(self.arch.encoder_hidden_override, 0)
+
         bidirectional = self.arch
-        self.assertEqual(
-            bidirectional.encoder_hidden_per_direction * bidirectional.encoder_directions,
-            bidirectional.hidden_dim)
+        self.assertEqual(bidirectional.latent_dim, bidirectional.hidden_dim)
 
         unidirectional = replace(self.arch, encoder_bidirectional=False)
         self.assertEqual(unidirectional.encoder_hidden_per_direction,
                          unidirectional.hidden_dim)
+        self.assertEqual(unidirectional.latent_dim, unidirectional.hidden_dim)
+
+        narrowed = replace(unidirectional, encoder_hidden_override=64)
+        self.assertNotEqual(narrowed.latent_dim, narrowed.hidden_dim)
 
     def test_dropout_is_zeroed_for_a_single_layer_lstm(self):
         """PyTorch would ignore it and warn; reporting it as applied would be a lie."""

@@ -107,6 +107,7 @@ SCHEMA = {
     "model": {
         "window_size": int, "stride": int, "hidden_dim": int,
         "encoder_bidirectional": bool, "encoder_layers": int,
+        "encoder_hidden_override": int,
         "decoder_layers": int, "use_bottleneck": bool,
         "bottleneck_divisor": int, "dropout": float, "input_noise_std": float,
     },
