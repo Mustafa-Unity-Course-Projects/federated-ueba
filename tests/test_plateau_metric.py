@@ -1,4 +1,4 @@
-"""The reported metric is a plateau mean, not one round's score (Y5).
+"""The reported metric is a plateau mean, not one round's score.
 
 The rule it replaced picked the round with the best validation PR-AUC. On a
 curve that is flat to about 0.005 after round 6, that argmax was choosing among

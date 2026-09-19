@@ -260,9 +260,12 @@ class DownlinkCodec:
     """What the server does to the global model before broadcasting it.
 
     Measuring one baseline run showed the uplink is a minority of the traffic.
-    Over 50 rounds the clients uploaded 2,003 MB and downloaded 6,441 MB, so
-    compressing only what clients send caps the achievable saving at 24% of the
-    total no matter how good the uplink compression gets. The downlink had been
+    Over 50 rounds the clients uploaded 2,003 MB and downloaded 6,018 MB, so a
+    method that shrinks only what clients send, and leaves the broadcast as it
+    was, saves at most about 25% of the total. That cap does not hold for every
+    uplink method: uplink fp16 also leaves the aggregate on the fp16 grid, the
+    broadcast then compresses better, and the quantization-fp16 arm saved 38.6%
+    of the total. The downlink had been
     charged at raw dense fp32 while the uplink was charged through an entropy
     coder, which was also an inconsistency in the measurement rather than a
     property of the transport.

@@ -1,7 +1,7 @@
 """Our results expressed in the metrics the CERT r4.2 literature reports.
 
-Jury item J15. The thesis compared itself against a "temel model" of its own
-making, which is not a baseline. The published work on this dataset is the
+The thesis compared itself against a "temel model" of its own making, which is
+not a baseline. The published work on this dataset is the
 baseline, and the obstacle is that it does not report what we report.
 
 Le and Zincir-Heywood (2021) evaluate on CERT R4.2 with **user-based ROC-AUC**

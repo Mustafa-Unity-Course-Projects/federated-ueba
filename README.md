@@ -110,7 +110,7 @@ it skipped before merging a structural change.
 
 ## Analyses that need no retraining
 
-These read a finished run and are the answers to three of the correction items:
+These read a finished run and answer three questions the reported metrics cannot:
 
 ```bash
 python analysis/analyze_features.py            feature table: source, meaning, distribution

@@ -265,11 +265,9 @@ def main():
     ap.add_argument("--seeds", default="1,2,3,4,5")
     ap.add_argument("--kollar", default=",".join(KOLLAR),
                     help="Rol ekseninin ayrıca ölçüleceği yapılandırmalar.")
-    ap.add_argument("--onbellek", default=os.path.join("ieee",
-                                                       "kontrol_ciktilari",
+    ap.add_argument("--onbellek", default=os.path.join("generated_visuals",
                                                        "etkinlik_hacmi.csv"))
-    ap.add_argument("--out-dir", default=os.path.join("ieee",
-                                                      "kontrol_ciktilari",
+    ap.add_argument("--out-dir", default=os.path.join("generated_visuals",
                                                       "eksen_matrisleri"))
     args = ap.parse_args()
 

@@ -1,7 +1,7 @@
 """How long after an insider starts does the system flag them?
 
-The jury asked this and it could not be answered. It is not a property of the
-metrics: PR-AUC says how well the ranking separates insiders from everyone else,
+The reported metrics cannot answer it, because it is not a property of
+them: PR-AUC says how well the ranking separates insiders from everyone else,
 and says nothing about when in an insider's campaign that separation appears.
 
 The measurement here replays each user day by day. On day D the user is scored
@@ -191,6 +191,9 @@ def main():
     config.set_experiment(args.experiment)
     run_id = config.run_id
 
+    # Kaydedilmis agirliklar, egitildikleri girdi donusumuyle puanlanmali.
+    scaling.assert_transform_matches_run(os.path.join(
+        "federated_evaluation_reports", run_id, "experiment_summary.json"))
     checkpoint = find_latest_checkpoint(config.get("federation", "save_path"))
     if checkpoint is None:
         print(f"'{run_id}' için checkpoint bulunamadı. Önce deneyi çalıştır.")
@@ -233,7 +236,12 @@ def main():
         cfg=cfg, window_size=task.WINDOW_SIZE, device=device)
 
     results = scorer.scan(model, df, all_users)
-    threshold = scoring.evaluate_scores(results, seed=config.seed)["threshold"]
+    # `split_seed`, kosum seedi degil. Bolunme degerlendirme protokolunun bir
+    # ozelligi ve butun kosumlarda 42de sabittir; kosum seedi verildiginde bes
+    # seedin dordunde tesadufen ayni esik cikiyor, seed 3te 9,3205 yerine
+    # 9,9293 (%6,5 yuksek). federated_insider_detection.py ayni duzeltmeyi
+    # yapip `seed` parametresini yok sayiyor; bu betik onu almamisti.
+    threshold = scoring.evaluate_scores(results, seed=cfg.split_seed)["threshold"]
     print(f"Eşik (doğrulama yarısından): {threshold:.4f}")
 
     insider_users = sorted(df.loc[df["insider"] != 0, "user"].unique())

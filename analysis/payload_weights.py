@@ -1,6 +1,6 @@
 """How many weights actually cross the wire, counted rather than assumed.
 
-J12 asks for the parameters and bytes sent per round. The communication log
+The parameters and bytes sent per round have to be reported. The communication log
 records bytes only, so the weight count has been quoted from the ratio: 10% of
 450,258 is 45,025. That is not what the code sends. `_topk_mask` selects per
 tensor with `max(1, int(size * ratio))`, so the total is a sum of 36 floors, not

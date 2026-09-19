@@ -12,9 +12,9 @@ Bu betik iki iş yapar:
               farkları listeler. Asıl değeri budur: belgenin veriden kaydığı
               yeri gösterir.
 
-**Sonuç dosyalarına yazmaz.** Yalnız `--out` ile verilen klasöre yazar; varsayılan
-`ieee/cizelgeler/`. `federated_evaluation_reports/`, `model_pickle/`,
-`generated_visuals/` ve benzerleri salt okunur kullanılır.
+**Sonuç dosyalarına yazmaz.** Yalnız `--out` ile verilen klasöre yazar; varsayılanı
+`generated_visuals/cizelgeler/`. `federated_evaluation_reports/`, `model_pickle/`
+ve benzerleri salt okunur kullanılır.
 
 Elle bakımda kalan çizelgeler ve sebepleri `ELLE` sözlüğünde yazılıdır; bunlar
 veriden değil karardan doğar ve betik onlara dokunmaz.
@@ -45,17 +45,25 @@ sys.path.insert(0, KOK)
 sys.path.insert(0, os.path.join(KOK, "analysis"))
 
 OZET = "experiment_comparison_summary.csv"
-BELGE = "ieee/23435004022_duzeltilmis.docx"
-VARSAYILAN_CIKTI = "ieee/cizelgeler"
+# Karşılaştırılacak belgenin varsayılanı yoktur: belge bu deponun parçası değil,
+# yolunu `--belge` ile veren çağıran bilir. Verilmediğinde çizelgeler üretilir,
+# yalnız belgeyle karşılaştırma adımı atlanır.
+BELGE = ""
+VARSAYILAN_CIKTI = "generated_visuals/cizelgeler"
 
 # Çizelgeler ne kadar sayı taşırsa taşısın, bir kısmı ölçümden değil karardan
 # doğar. Bunları üretmek, olmayan bir kaynağı varmış gibi göstermek olurdu.
 ELLE = {
     "2.1": "literatür konumlandırması; üç niteliğe göre okuma kararı",
-    "4.2": "açıklama sütunu elle yazılmış (ölçülen sütunları 4.2m üretir)",
-    "5.1": "konfigürasyon listesi; her satır bir tasarım sorusu",
-    "5.2": "prototip dönemi tarihçesi; yeniden koşulamaz",
-    "5.11": "üst bloğu yayımlanmış literatür değeri, veriden türemez",
+    "EK A": "açıklama ve kaynak sütunları elle yazılmış (ölçülen sütunları üretilir)",
+    "5.1": "prototip dönemi tarihçesi; yeniden koşulamaz",
+    "5.10": "üst bloğu yayımlanmış literatür değeri, veriden türemez",
+    "EK B": "konfigürasyon listesi; her satır bir tasarım sorusu",
+    "EK C": "ayrı betikten: analysis/ana_cizelge.py",
+    "5.11": "ayrı betikten: analysis/scenario_breakdown.py ve analysis/analyze_detection_latency.py",
+    "5.12": "ayrı betikten: analysis/rol_karisiklik_matrisi.py",
+    "5.13": "ayrı betikten: analysis/eksen_karisiklik_matrisleri.py",
+    "5.14": "ayrı betikten: analysis/eksen_karisiklik_matrisleri.py --kollar",
 }
 
 
@@ -201,12 +209,12 @@ def cizelge_4_1():
 
 # --- Çizelge 4.2m: ölçülen sütunlar (std ve sıfır oranı) --------------------
 
-def cizelge_4_2m(veri=None):
+def cizelge_ek_a(veri=None):
     from config_manager import config
     ozn = list(config.get("data", "selected_features"))
     yol = veri or os.path.join(KOK, "ExtractedData", "dayr4.2-percentile30.csv")
     if not os.path.exists(yol):
-        raise SystemExit(f"{yol} yok; 4.2'nin ölçülen sütunları üretilemez.")
+        raise SystemExit(f"{yol} yok; EK A'nın ölçülen sütunları üretilemez.")
     d = pd.read_csv(yol, usecols=ozn)
     satirlar = []
     for f in ozn:
@@ -251,7 +259,7 @@ def _yukleme_mesaji():
 
 # --- Çizelge 4.3: analitik boyut ile telde ölçülen boyut --------------------
 
-def cizelge_4_3():
+def cizelge_4_2():
     from config_manager import config
     from federated_ueba.task import Architecture, LSTMAutoencoder
     arch = Architecture.from_config(config)
@@ -296,7 +304,7 @@ ILETISIM_SIRA = ["baseline", "quantization-fp16", "bidirectional-fp16",
                  "top-k-0.1", "top-k-0.1-quant-fp16", "top-k-0.05"]
 
 
-def cizelge_5_3():
+def cizelge_5_2():
     d = _ozet()
     temel = _ort(d, "baseline", "Total_Comm_MB")
     satirlar = []
@@ -321,7 +329,7 @@ SEYREKLIK = [("baseline", "baseline"),
              ("delta-0.05", "Güncelleme seyrekleştirme, α = 0,05")]
 
 
-def cizelge_5_4(seed=1):
+def cizelge_5_3(seed=1):
     satirlar = []
     for kol, etiket in SEYREKLIK:
         w = _checkpoint(kol, seed)
@@ -333,7 +341,7 @@ def cizelge_5_4(seed=1):
 
 # --- Çizelge 5.5: yakınsama ve plato turu ----------------------------------
 
-def cizelge_5_5():
+def cizelge_5_4():
     d = _ozet()
     satirlar = []
     for ad in ILETISIM_SIRA:
@@ -373,7 +381,7 @@ def _bootstrap_ayari():
             config.get("evaluation", "bootstrap_confidence"))
 
 
-def cizelge_5_6(yineleme=None, guven=None):
+def cizelge_5_5(yineleme=None, guven=None):
     if yineleme is None or guven is None:
         yineleme, guven = _bootstrap_ayari()
     d = _ozet()
@@ -391,7 +399,7 @@ def cizelge_5_6(yineleme=None, guven=None):
     return ["Konfigürasyon", "PR-AUC", "sd", "Katkının %95 aralığı", "Karar"], satirlar
 
 
-def cizelge_5_7(yineleme=None, guven=None):
+def cizelge_5_6(yineleme=None, guven=None):
     if yineleme is None or guven is None:
         yineleme, guven = _bootstrap_ayari()
     from findings import ABLATIONS
@@ -412,7 +420,7 @@ def cizelge_5_7(yineleme=None, guven=None):
             etiket[anahtar], tr(_pr(yok)),
             "-" if f is None else tri(f["Mean_Difference"]),
             "-" if f is None else f"[{tri(f['CI_Lo'])}, {tri(f['CI_Hi'])}]",
-            "Katkısı yok, kaldırıldı" if anahtar == "diversity"
+            "Gösterilemedi, kaldırıldı" if anahtar == "diversity"
             else "Aşama gerekli"])
     return (["Konfigürasyon", "PR-AUC", "Çıkarılan aşamanın katkısı",
              "%95 aralık", "Karar"], satirlar)
@@ -420,7 +428,7 @@ def cizelge_5_7(yineleme=None, guven=None):
 
 # --- Çizelge 5.8: düğüm sayısı ---------------------------------------------
 
-def cizelge_5_8():
+def cizelge_5_7():
     d = _ozet()
     temel = _ort(d, "baseline", "Total_Comm_MB")
     satirlar = []
@@ -445,7 +453,7 @@ HETEROJENLIK = [("baseline", "IID", "FedAvg"),
                 ("role-fedprox-non-iid", "Role göre", "FedProx")]
 
 
-def cizelge_5_9():
+def cizelge_5_8():
     d = _ozet()
     return (["Deney", "Bölümleme", "Birleştirme", "PR-AUC", "sd"],
             [[ad, bol, bir, tr(_pr(ad)), tr(_prsd(ad))]
@@ -470,7 +478,7 @@ ESIK_SATIRLARI = [
 ]
 
 
-def cizelge_5_10():
+def cizelge_5_9():
     import statistics
     from config_manager import config
     from threshold_metrics import topla
@@ -491,8 +499,9 @@ def cizelge_5_10():
 
 URETICILER = {
     "4.1": cizelge_4_1,
-    "4.2m": cizelge_4_2m,
-    "4.3": cizelge_4_3,
+    "EK A": cizelge_ek_a,
+    "4.2": cizelge_4_2,
+    "5.2": cizelge_5_2,
     "5.3": cizelge_5_3,
     "5.4": cizelge_5_4,
     "5.5": cizelge_5_5,
@@ -500,7 +509,6 @@ URETICILER = {
     "5.7": cizelge_5_7,
     "5.8": cizelge_5_8,
     "5.9": cizelge_5_9,
-    "5.10": cizelge_5_10,
 }
 
 
@@ -558,10 +566,18 @@ def karsilastir(no, basliklar, satirlar, tablo):
     return fark
 
 
+
+def _etiket(no):
+    """EK tabloları çizelge numarası taşımaz; başlık ona göre yazılır."""
+    return no if str(no).startswith("EK") else f"Çizelge {no}"
+
+
 def main():
     ayr = argparse.ArgumentParser(description=__doc__)
     ayr.add_argument("--out", default=VARSAYILAN_CIKTI)
     ayr.add_argument("--only", default="")
+    ayr.add_argument("--belge", default=BELGE,
+                     help="karşılaştırılacak belge; verilmezse karşılaştırma atlanır")
     ayr.add_argument("--check", action="store_true",
                      help="yalnız belgeyle karşılaştır, dosya yazma")
     ayr.add_argument("--iterations", type=int, default=None,
@@ -577,11 +593,24 @@ def main():
 
     if not a.check:
         os.makedirs(a.out, exist_ok=True)
+        # Numaralandirma degistiginde eski dosyalar kalirsa ayni ad iki farkli
+        # cizelgeyi gosterir ve Word'e yanlis tablo yapistirilabilir. Bu
+        # dizin tamamen uretilen bir ciktidir, once bosaltilir.
+        for eski in glob.glob(os.path.join(a.out, "cizelge_*.tsv")):
+            os.remove(eski)
 
+    belge = a.belge
     belgedeki = {}
-    if os.path.exists(BELGE):
+    if not belge:
+        print("!  Karşılaştırılacak belge verilmedi (--belge).")
+        print("   Üretilen çizelgeler denetlenmeden yazılacak.")
+    elif not os.path.exists(belge):
+        print(f"!  Belge bulunamadı: {belge}")
+        print("   Karşılaştırma yapılamayacak; üretilen çizelgeler "
+              "denetlenmeden yazılacak.")
+    else:
         try:
-            belgedeki = belgedeki_cizelgeler(BELGE)
+            belgedeki = belgedeki_cizelgeler(belge)
         except Exception as hata:
             print(f"!  belge okunamadı ({hata}); karşılaştırma atlanıyor")
 
@@ -590,9 +619,9 @@ def main():
     for no in istenen:
         try:
             sonuc = (URETICILER[no](yineleme=a.iterations)
-                     if no in ("5.6", "5.7") else URETICILER[no]())
+                     if no in ("5.5", "5.6") else URETICILER[no]())
         except SystemExit as hata:
-            print(f"!  Çizelge {no}: {hata}")
+            print(f"!  {_etiket(no)}: {hata}")
             sorunlu.append(no)
             continue
         basliklar, satirlar = sonuc
@@ -604,7 +633,7 @@ def main():
                 for s in satirlar:
                     f.write("\t".join(s) + "\n")
 
-        inceleme.append(f"\n## Çizelge {no}\n")
+        inceleme.append(f"\n## {_etiket(no)}\n")
         inceleme.append("| " + " | ".join(basliklar) + " |")
         inceleme.append("|" + "---|" * len(basliklar))
         for s in satirlar:
@@ -613,16 +642,19 @@ def main():
         if no in belgedeki:
             fark = karsilastir(no, basliklar, satirlar, belgedeki[no])
             if fark:
-                print(f"!  Çizelge {no}: belgeden {len(fark)} farkı var")
+                print(f"!  {_etiket(no)}: belgeden {len(fark)} farkı var")
                 for f in fark[:8]:
                     print(f"     {f}")
                 if len(fark) > 8:
                     print(f"     ... {len(fark) - 8} fark daha")
                 inceleme.append(f"\n**Belgeden farkı: {len(fark)} hücre.**\n")
             else:
-                print(f"   Çizelge {no}: belgeyle birebir")
-        elif no != "4.2m":
-            print(f"   Çizelge {no}: üretildi (belgede eşleşen çizelge bulunamadı)")
+                print(f"   {_etiket(no)}: belgeyle birebir")
+        elif no == "EK A":
+            print("   EK A: üretildi (ek tabloları altyazı taşımadığından "
+                  "belgeyle karşılaştırılmamaktadır)")
+        else:
+            print(f"   {_etiket(no)}: üretildi (belgede eşleşen çizelge bulunamadı)")
 
     if not a.check:
         yol = os.path.join(a.out, "hepsi.md")
@@ -631,9 +663,17 @@ def main():
         print(f"\nYazıldı: {a.out}/  ({len(istenen) - len(sorunlu)} çizelge, "
               f"sekme ayraçlı + hepsi.md)")
 
+    # Kapsam koruması. Bir çizelge belgede varken ne üreticisi ne de elle
+    # bakım kaydı bulunuyorsa --check onun üzerinden sessizce geçer ve
+    # eksiksiz bir denetim yapmış gibi görünür. 5.11-5.14 tam olarak böyleydi.
+    kapsanmayan = sorted(set(belgedeki) - set(URETICILER) - set(ELLE))
+    if kapsanmayan:
+        print("\n!  Belgede olup hiçbir kayıtta geçmeyen çizelge: "
+              + ", ".join(_etiket(x) for x in kapsanmayan))
+
     print("\nElle bakımda kalanlar:")
     for no, sebep in sorted(ELLE.items()):
-        print(f"  Çizelge {no}: {sebep}")
+        print(f"  {_etiket(no)}: {sebep}")
     return 1 if sorunlu else 0
 
 

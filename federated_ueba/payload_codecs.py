@@ -8,13 +8,13 @@ better encoding costs nothing in detection performance.
 This matters here more than it usually would. At the ratios this work uses, the
 indices are not a rounding error in the payload, they are most of it:
 
-    K = 0.10, fp32   45,025 values     indices are 50% of the payload
-    K = 0.10, fp16   45,025 values     indices are 67% of the payload
+    K = 0.10, fp32   45,010 values     indices are 50% of the payload
+    K = 0.10, fp16   45,010 values     indices are 67% of the payload
 
 A four-byte index per surviving weight is the obvious encoding and the wrong one.
 A bitmask spends one bit per *model* parameter instead of 32 bits per *surviving*
-parameter, so it wins whenever the density exceeds 1/32 = 0.031. Both ratios used
-here are above that threshold.
+parameter, so it wins whenever the density exceeds 1/32. Both ratios used here are
+above that threshold.
 
 Every codec round-trips exactly. `test_payload_codecs.py` asserts it, because a
 claim of losslessness is only worth as much as its verification.

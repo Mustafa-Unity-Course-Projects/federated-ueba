@@ -158,11 +158,6 @@ class FlowerClient(fl.client.NumPyClient):
         # whatever order the actors finish, and floating point addition is not
         # associative, so an unordered sum differs in its last bits between runs
         # and the difference compounds over 50 rounds.
-        # The partition travels back with the update so the server can put the
-        # results in a fixed order before averaging them. Ray returns them in
-        # whatever order the actors finish, and floating point addition is not
-        # associative, so an unordered sum differs in its last bits between runs
-        # and the difference compounds over 50 rounds.
         return (self.get_parameters(config={}, phase="fit"),
                 len(self.trainloader), {"partition_id": self.partition_id})
 

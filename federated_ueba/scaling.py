@@ -22,8 +22,8 @@ they are what secure aggregation is designed to add up, and they disclose far
 less than the per-feature minimum and maximum a MinMax scaler would need.
 
 The aggregation runs in a loop here because the experiments are a single-process
-simulation. In a deployment it is one round: every client sends 3 x 50 numbers,
-the server sums them and broadcasts the result.
+simulation. In a deployment it is one round: every client sends one count and two
+50-long vectors, 101 numbers, and the server sums them and broadcasts the result.
 """
 
 import os
@@ -83,6 +83,47 @@ def _apply_transform(values, transform):
         return values
     raise ValueError(f"Unknown feature transform {transform!r}. "
                      f"Expected one of {list(FEATURE_TRANSFORMS)}.")
+
+
+def assert_transform_matches_run(summary_path, transform=None):
+    """Stop if a saved run was trained under a different feature transform.
+
+    Every scoring path reads the transform from the live configuration, which is
+    right during a run and wrong afterwards. Re-scoring a saved checkpoint is the
+    case that breaks: the weights were fitted on `log1p_positive` inputs, and
+    nothing stops a later analysis from feeding them `signed_log1p` ones because
+    someone changed `[data] feature_transform` in between. The scores would be
+    lower, no exception would be raised, and the number would be reported.
+
+    This is the same failure the duplicated transform in `scoring.py` could have
+    caused, closed at the other end: there the two copies could diverge, here the
+    run and the analysis can. Scripts that load a checkpoint call this first.
+
+    A run whose summary predates the setting is treated as `log1p_positive`,
+    which is what it was.
+    """
+    import json
+    import os
+
+    if transform is None:
+        from config_manager import config
+        transform = config.get("data", "feature_transform")
+
+    if not os.path.exists(summary_path):
+        return transform
+
+    with open(summary_path, encoding="utf-8") as handle:
+        kayitli = json.load(handle)
+    egitim = (kayitli.get("config", {}).get("data", {})
+              .get("feature_transform", "log1p_positive"))
+
+    if egitim != transform:
+        raise SystemExit(
+            f"Bu kosum '{egitim}' donusumuyle egitilmis, su anki yapilandirma "
+            f"'{transform}' diyor ({summary_path}). Kaydedilmis agirliklari "
+            f"baska bir girdi donusumuyle puanlamak sessizce yanlis bir sayi "
+            f"uretir. [data] feature_transform degerini duzeltin.")
+    return transform
 
 
 def prepare_features(df, features, transform=None):

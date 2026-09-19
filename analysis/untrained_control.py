@@ -2,8 +2,8 @@
 
 A reported PR-AUC does not say which part of the system earned it. The scoring
 pipeline calibrates, focuses, and aggregates before any number is produced, and
-those stages work on whatever the network hands them. So the question a jury will
-ask is fair: would a network that learned nothing do just as well?
+those stages work on whatever the network hands them. So the fair question is:
+would a network that learned nothing do just as well?
 
 Four probes, each removing one more thing, all sharing the same scoring:
 

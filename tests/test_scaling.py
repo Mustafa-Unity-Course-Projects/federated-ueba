@@ -9,6 +9,8 @@ namely that the scaler must not depend on how users were split.
 
 import os
 import sys
+import json
+import tempfile
 import unittest
 
 import numpy as np
@@ -246,6 +248,52 @@ class TestEmptyInput(unittest.TestCase):
         with_all = scaling.build_global_scaler(df, features, [users])
         without = scaling.build_global_scaler(df, features, [users[1:]])
         np.testing.assert_allclose(with_all.mean_, without.mean_, atol=1e-9)
+
+
+class TestTransformMatchesRun(unittest.TestCase):
+    """The guard on re-scoring a saved checkpoint.
+
+    Weights fitted on one input transform, scored under another, produce a lower
+    number and no exception. The transform is read from the live configuration,
+    which is right during a run and wrong afterwards, so the run records what it
+    trained under and analyses that load a checkpoint check it.
+    """
+
+    def _summary(self, transform):
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, "experiment_summary.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"config": {"data": {"feature_transform": transform}}},
+                      handle)
+        return path
+
+    def test_matching_transform_passes(self):
+        path = self._summary("log1p_positive")
+        self.assertEqual(
+            scaling.assert_transform_matches_run(path,
+                                                 transform="log1p_positive"),
+            "log1p_positive")
+
+    def test_different_transform_stops_the_run(self):
+        path = self._summary("log1p_positive")
+        with self.assertRaises(SystemExit):
+            scaling.assert_transform_matches_run(path,
+                                                 transform="signed_log1p")
+
+    def test_summary_without_the_setting_is_read_as_the_original(self):
+        """Runs older than the setting were log1p_positive; nothing else."""
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, "experiment_summary.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"config": {"data": {}}}, handle)
+        scaling.assert_transform_matches_run(path, transform="log1p_positive")
+        with self.assertRaises(SystemExit):
+            scaling.assert_transform_matches_run(path, transform="raw")
+
+    def test_missing_summary_is_not_an_error(self):
+        """A path that does not exist cannot contradict anything."""
+        scaling.assert_transform_matches_run("yok/experiment_summary.json",
+                                             transform="raw")
 
 
 if __name__ == "__main__":

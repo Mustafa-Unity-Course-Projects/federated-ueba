@@ -16,8 +16,8 @@ study (see the `ablation-*` entries in pyproject.toml):
 
 A fourth stage, the diversity multiplier, scaled up windows where many features
 deviated at once. It is implemented and still reachable, but it is off by
-default: measured across five seeds, removing it improved detection every time
-(mean +0.0119). It was kept rather than deleted so `ablation-with-diversity` can
+default: measured across five seeds its contribution could not be shown
+(-0.0117, 95% interval [-0.0354, +0.0053], same sign in 90% of resamples). It was kept rather than deleted so `ablation-with-diversity` can
 still produce that comparison. `STAGES` therefore lists four names while the
 configured default lists three.
 

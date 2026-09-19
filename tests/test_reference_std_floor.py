@@ -1,4 +1,4 @@
-"""A near-constant feature must not be able to take over the ranking (Y15).
+"""A near-constant feature must not be able to take over the ranking.
 
 Stage one of the scoring divides by the reference standard deviation of each
 feature. Four of the fifty features have a reference std around 3e-5, so

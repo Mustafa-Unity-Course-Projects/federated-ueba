@@ -2,7 +2,8 @@
 
 `compare_experiments.py` already bootstraps each run by resampling users. That
 answers "how much does this number depend on which 1000 people we evaluated on",
-and it is the interval J17 asks for. It cannot answer the question that decides
+and it is one of the two intervals worth reporting. It cannot answer the question
+that decides
 whether one configuration beats another, because it holds the training run fixed.
 
 Two runs of the same configuration differ for reasons that have nothing to do
@@ -20,7 +21,7 @@ So this reports three figures per experiment:
                  "top-k 0.1 costs nothing" has to survive.
 
 It also reports each experiment at two round choices, because the choice is not
-innocent (see Y5/Y9 in ieee/juri_duzeltme_listesi.md):
+innocent:
 
   own-best       each seed evaluated at its own argmax round. What we report
                  today, and optimistic: the argmax is partly noise, and picking
@@ -137,7 +138,7 @@ def available_rounds(exp_dir):
 def plateau_frames(exp_dir, window=None):
     """Per-user scores for each round the reported metric averages over.
 
-    This is the statistic the thesis reports (Y5): the mean over the last
+    This is the statistic the thesis reports: the mean over the last
     `plateau_window_rounds` rounds, not the value at one selected round. A run is
     therefore represented here by several frames rather than one, and every
     consumer below averages across them.
@@ -377,7 +378,7 @@ def summarise(experiment, runs, iterations, confidence, seed=42):
     tail = (1.0 - confidence) / 2.0 * 100.0
     rows = []
 
-    # "plateau" is what the thesis reports; the other two are kept as the Y5
+    # "plateau" is what the thesis reports; the other two are kept as a
     # sensitivity analysis, showing what a round-selection rule would have bought.
     choices = {"plateau": "plateau",
                "own-best": None,

@@ -252,7 +252,7 @@ def main():
     ap.add_argument("--seeds", default="1,2,3,4,5")
     ap.add_argument("--min-users", type=int, default=15,
                     help="Bu kadar kullanıcısı olmayan roller tek satırda toplanır.")
-    ap.add_argument("--out", default=os.path.join("ieee", "kontrol_ciktilari",
+    ap.add_argument("--out", default=os.path.join("generated_visuals",
                                                   "rol_karisiklik.csv"))
     args = ap.parse_args()
 

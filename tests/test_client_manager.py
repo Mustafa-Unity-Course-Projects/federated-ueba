@@ -1,6 +1,6 @@
 """Client sampling has to be reproducible, and for a while it was not.
 
-Recorded as a reproducibility limit (Y4) on the reasoning that Flower samples
+Recorded as a reproducibility limit on the reasoning that Flower samples
 inside its own client manager and the seed cannot reach it. Half right: the seed
 does reach it, but `SimpleClientManager.sample` draws from `list(self.clients)`,
 whose order is the order Ray's actors registered in. Two runs of the same seed

@@ -97,8 +97,9 @@ insecure = true  # Remove this line to enable TLS
 [tool.fueba.experiment]
 # Seeds data partitioning, the initial model, each client's local training and
 # the evaluation splits. It does NOT control which clients a round samples: the
-# simulation framework generates client identifiers randomly per run. See the
-# reproducibility section of ieee/juri_duzeltme_listesi.md.
+# simulation framework generates client identifiers randomly per run.
+# `federated_ueba/seeding.py` derives every per-client seed from this value, the
+# partition id and the round number.
 seed = 42
 
 # auto, cpu or cuda. The GPU is worth roughly 3.4x here (98.7s against 334.1s on
@@ -322,13 +323,16 @@ lzma_preset = 6
 
 # --- Downlink: what the server broadcasts to the clients --------------------
 # The larger direction. A round sends the model to 25 clients to train and to all
-# 50 to evaluate, while only 25 upload, so leaving this uncompressed caps the
-# achievable total saving at roughly a quarter however good the uplink gets.
+# 50 to evaluate, while only 25 upload, so an uplink method that leaves the
+# broadcast unchanged saves at most about a quarter of the total. Uplink fp16 is
+# the exception measured here: it leaves the aggregate on the fp16 grid, the
+# broadcast compresses better, and that arm saved 38.6% of the total.
 #
-# Only "quantization" is available, and the empty list means fp32. Sparsification
-# cannot apply here: the server sends one identical payload to every client, and
-# a delta is only decodable by a client that holds the model it was taken
-# against. See DownlinkCodec.
+# Only "quantization" is available, and the empty list means fp32. Update
+# sparsification cannot apply here: the server sends one identical payload to
+# every client, and a delta is only decodable by a client that holds the model it
+# was taken against. Sparsifying the broadcast weights themselves is not
+# implemented. See DownlinkCodec.
 downlink_plugins = []
 
 # Lossless, so this changes the reported download size and nothing the clients
@@ -422,7 +426,7 @@ split_seed = 42
 convergence_peak_fraction = 0.95
 plateau_tolerance = 0.005
 
-# How many final rounds the reported metric averages over (Y5).
+# How many final rounds the reported metric averages over.
 #
 # The reported number used to come from the single round with the best validation
 # PR-AUC. After round 6 the validation curve is flat with a standard deviation
@@ -454,9 +458,9 @@ bootstrap_confidence = 0.95
 # below except the smoke tests", which had grown to 29 configurations and about
 # 70 hours. Most of those were exploratory: they answered a question once and
 # then stayed in the sweep, costing hours on every re-run and, worse, adding a
-# result the thesis has to defend. The jury's own rule was that no question may
-# be met with "I don't remember" a second time, and every extra configuration is
-# one more question.
+# result the thesis has to defend. The rule here is that no question about a
+# reported configuration may be met with "I don't remember", and every extra
+# configuration is one more question.
 #
 # So the list below is the set the thesis reports, nothing else. Everything not
 # named here is still defined, still runnable, and still tested; it is simply not
@@ -479,7 +483,7 @@ experiments = [
     "delta-0.1", "delta-0.05",
     "top-k-0.1", "top-k-0.05",
 
-    # Quantization, and the combined configuration J12's table needs.
+    # Quantization, and the combined configuration the payload table needs.
     "quantization-fp16",
     "top-k-0.1-quant-fp16",
 
@@ -491,7 +495,7 @@ experiments = [
     "bidirectional-fp16",
     "delta-0.05-downlink-fp16",
 
-    # J18: the non-IID setting and the one alternative aggregation rule. Two
+    # The non-IID setting and the one alternative aggregation rule. Two
     # pairs, because they test different things. The first skews how much data a
     # client holds, which measurably does not move the client distributions and
     # so cannot challenge FedAvg; the second skews which kind of user a client
@@ -513,7 +517,7 @@ experiments = [
     # withdrawn.
     "fedprox-baseline",
 
-    # J5 and J13: feature selection, and the round/epoch trade.
+    # Feature selection, and the round/epoch trade.
     "features-filtered",
     "rounds-25-epochs-10",
 
@@ -532,7 +536,7 @@ experiments = [
     "nodes-20",
     "nodes-10",
 
-    # J10: the scoring stages, each removed in turn. These rescore
+    # The scoring stages, each removed in turn. These rescore
     # `ablation-full`'s weights rather than training, so they cost minutes.
     # `ablation-with-diversity` is the odd one out: it adds a stage back, which
     # is how the multiplier removed on 2026-08-14 stays measurable.
@@ -540,7 +544,7 @@ experiments = [
     "ablation-no-zscore", "ablation-no-topk", "ablation-no-persistence",
     "ablation-with-diversity",
 
-    # J7: the two architecture choices the jury asked us to justify. Unlike the
+    # The two architecture choices that need justifying. Unlike the
     # scoring ablations above these retrain, because the weights they question
     # are the weights themselves.
     "encoder-unidirectional",
@@ -639,7 +643,7 @@ data.is_non_iid = false
 # uploads less than the weight variant does (123.7 MB against 125.9); it looks
 # worse only because nothing compresses the downlink, which is three quarters of
 # the traffic. Without this run the thesis reports its own recommendation in an
-# incomplete configuration, and a jury reading the total-saving column would be
+# incomplete configuration, and a reader of the total-saving column would be
 # right to ask why.
 #
 # Estimated at roughly 61% total: 123.7 MB up, the ~5955 MB down halved by fp16.
@@ -800,9 +804,9 @@ efficiency.active_plugins = []
 data.is_non_iid = false
 data.drop_constant_features = true
 
-# --- Architecture ablations (J7), added 2026-08-10 ------------------------------
-# The jury's objection to J7 was that the architecture was described but not
-# justified, and until now the two choices it asks about had never been measured:
+# --- Architecture ablations, added 2026-08-10 -----------------------------------
+# The objection was that the architecture was described but not justified, and
+# until now the two choices in question had never been measured:
 # `encoder_bidirectional` and `use_bottleneck` were declared, overridable, and
 # left at their defaults by every experiment. Argument and citation can defend a
 # design; only these two runs can say what it is worth.

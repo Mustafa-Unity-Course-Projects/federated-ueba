@@ -1,7 +1,7 @@
 """The three convergence definitions reported for every federated run.
 
-The jury asked what "converged" means and the thesis and the code had drifted
-apart on the answer, so every definition is pinned here. They are pure functions
+What "converged" means needs one answer, and the thesis and the code had drifted
+apart on it, so every definition is pinned here. They are pure functions
 over the per-round validation scores; nothing about training is involved.
 
 Two of them read each run against its own peak and belong to that run alone. The
@@ -105,7 +105,7 @@ class TestSharedConvergenceRound(unittest.TestCase):
         self.assertIsNone(find_shared_convergence_round([], [], 0.85))
 
     def test_it_reverses_the_ranking_the_per_run_definition_gives(self):
-        """The measurement that made this column necessary (Y9).
+        """The measurement that made this column necessary.
 
         A weaker configuration reaches 95% of its own lower ceiling sooner, so
         the per-run number calls it the faster one. Against a shared target it
@@ -137,7 +137,7 @@ class TestSharedConvergenceTarget(unittest.TestCase):
     """Where the shared target comes from: the baseline runs' own CSVs.
 
     Reading the round CSV rather than the summary is the point. It means the
-    column can be added to runs that already finished, so closing Y9 costs no
+    column can be added to runs that already finished, so adding it costs no
     re-runs and cannot change a number a running experiment is reporting.
     """
 

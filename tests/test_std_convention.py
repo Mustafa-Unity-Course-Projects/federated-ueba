@@ -5,7 +5,7 @@
 
 Çizelge 4.2'nin Std sütunu `analyze_features.py`'den geldi ve pandas'ın
 varsayılanını, yani örneklem sapmasını (ddof=1) kullanıyor.
-`build_tables.cizelge_4_2m` ise aynı sütunu yeniden üretirken anakütle sapmasını
+`build_tables.cizelge_ek_a` ise aynı sütunu yeniden üretirken anakütle sapmasını
 (ddof=0) kullanıyordu. 308.023 satırda aradaki oran 1 + 1/(2n), yani dördüncü
 ondalığı on bir satırda bir kaydırmaya yetiyor. Sonuç: `--check` belgeyi on bir
 yerde yanlış gösteriyordu, oysa yanlış olan üreticiydi.
@@ -46,7 +46,7 @@ class FeatureStdConvention(unittest.TestCase):
 
     def test_cizelge_4_2m_ornek_sapmasi_veriyor(self):
         """Üretici ile belgenin sütunu aynı büyüklüğü göstermeli."""
-        from analysis.build_tables import cizelge_4_2m
+        from analysis.build_tables import cizelge_ek_a
 
         import tempfile
         with tempfile.TemporaryDirectory() as klasor:
@@ -59,7 +59,7 @@ class FeatureStdConvention(unittest.TestCase):
                 lambda b, a, *k, **kw: list(self.frame.columns)
                 if (b, a) == ("data", "selected_features") else gercek(b, a, *k, **kw))
             try:
-                _, satirlar = cizelge_4_2m(veri=yol)
+                _, satirlar = cizelge_ek_a(veri=yol)
             finally:
                 config_manager.config.get = gercek
 

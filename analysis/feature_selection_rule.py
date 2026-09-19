@@ -1,12 +1,12 @@
 """What separates the 50 selected features from the 491 candidates.
 
-The jury asked why these fifty (item J5). "Domain knowledge" is an honest answer
+"Why these fifty?" is a fair question. "Domain knowledge" is an honest answer
 but not a checkable one, so this script recovers the rule the selection actually
 follows and measures whether the rule is justified.
 
-The extraction pipeline crosses each activity channel against four breakdown
-axes: work-hour context, device class, file or URL type, and within-day mean
-instead of count. A column that departs from its channel base on at most one of
+The extraction pipeline crosses each activity channel against five breakdown
+axes: work-hour context, device class, disk, file or URL type, and within-day
+mean instead of count. A column that departs from its channel base on at most one of
 those axes is a main effect; one that departs on two or more is an interaction
 term.
 

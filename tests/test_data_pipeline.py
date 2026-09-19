@@ -1,11 +1,11 @@
-"""Windowing and user partitioning: the arithmetic the jury asked about.
+"""Windowing and user partitioning: the arithmetic behind the reported counts.
 
-Two of the correction items are answered by numbers this file pins:
+Two open questions are answered by numbers this file pins:
 
-  J6   the thesis says both "10 days" and "14 days", and never states how many
-       windows a user actually produces
-  J18  the non-IID split has to be a documented Dirichlet partition rather than
-       a claim, and it has to lose no users
+  - the thesis said both "10 days" and "14 days", and never stated how many
+    windows a user actually produces
+  - the non-IID split has to be a documented Dirichlet partition rather than
+    a claim, and it has to lose no users
 
 Nothing here trains anything. These are the pure functions around the model, and
 they are the ones whose behaviour ends up quoted in the text.
@@ -220,7 +220,7 @@ class TestFeatureSelection(unittest.TestCase):
 
 
 class TestVarianceFilter(unittest.TestCase):
-    """The systematic feature selection the jury asked for (J5).
+    """The systematic alternative to hand-picked feature selection.
 
     Off by default, because dropping features changes the input dimension and
     therefore the parameter count every communication figure derives from.

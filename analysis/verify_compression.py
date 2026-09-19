@@ -1,6 +1,6 @@
 """Is the compression applied, or only counted?
 
-A fair question, and one the jury will ask: the configurations differ by only a
+A fair question, and one worth settling: the configurations differ by only a
 few hundredths of PR-AUC, which is what it would look like if the plugins never
 touched the weights and the saving were an arithmetic exercise on the side. This
 checks both halves of that suspicion against the artefacts on disk.

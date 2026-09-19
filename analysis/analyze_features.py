@@ -1,11 +1,11 @@
 """Produce the feature table the thesis needs, from the data rather than by hand.
 
-Answers two of the correction items with measurements instead of assertions:
+Answers two open questions with measurements instead of assertions:
 
-  J4  the thesis documents no feature table at all: which feature came from which
-      raw CSV, what it measures, and what its distribution looks like
-  J5  the 50 features are described as chosen by intuition. The extraction script
-      emits 510 columns, so the question "why these 50" is a real one
+  - no feature table existed at all: which feature came from which raw CSV, what
+    it measures, and what its distribution looks like
+  - the 50 features were described as chosen by intuition. The extraction script
+    emits 510 columns, so the question "why these 50" is a real one
 
 Written as a script so the table in the thesis and the features in the code
 cannot drift apart: rerun it and the numbers are current by construction.
@@ -60,17 +60,82 @@ ALL_ACTIVITY_FEATURES = {"n_workhourallact", "n_afterhourallact"}
 # The naming convention carries the meaning; these describe the irregular parts.
 PC_ROLE_MEANING = {
     "pc0": "kendi bilgisayarı",
-    "pc1": "paylaşılan bilgisayar",
-    "pc2": "başkasının bilgisayarı",
-    "pc3": "sunucu",
+    "pc1": "paylaşımlı bilgisayar",
+    "pc2": "başka bir kullanıcının bilgisayarı",
+    "pc3": "amirinin bilgisayarı",
 }
 FILE_TYPE_MEANING = {
-    "otherf": "diğer", "compf": "sıkıştırılmış", "phof": "görsel",
-    "docf": "belge", "txtf": "metin", "exef": "çalıştırılabilir",
+    "otherf": "diğer", "compf": "sıkıştırılmış", "phof": "görüntü",
+    "docf": "belge", "txtf": "metin", "exef": "yürütülebilir",
 }
 HTTP_CATEGORY_MEANING = {
-    "socnetf": "sosyal medya", "cloudf": "bulut depolama", "jobf": "iş arama",
+    "socnetf": "sosyal ağ", "cloudf": "bulut depolama", "jobf": "iş arama",
 }
+
+# Written out for the features the thesis uses, because the naming convention
+# alone produces raw field names ("n des", "http c len") in the description
+# column. Each line follows the extraction code: `disk` is 1 for a path starting
+# with C: and 0 for any path starting with neither C: nor R:; `Xemail` and
+# `exbccmail` flag an external recipient and an external blind-copy recipient;
+# `*_len` is the length of the content and `*_nwords` its word count.
+FEATURE_DESCRIPTIONS = {
+    "isweekday": "Gün hafta içi mi",
+    "isweekend": "Gün hafta sonu mu",
+    "n_workhourallact": "Mesai içi toplam olay sayısı",
+    "n_afterhourallact": "Mesai dışı toplam olay sayısı",
+    "n_logon": "Günlük oturum açma sayısı",
+    "n_workhourlogon": "Mesai içi oturum açma sayısı",
+    "n_afterhourlogon": "Mesai dışı oturum açma sayısı",
+    "logon_n-pc0": "Kendi bilgisayarında oturum açma sayısı",
+    "logon_n-pc1": "Paylaşımlı bilgisayarda oturum açma sayısı",
+    "logon_n-pc2": "Başka bir kullanıcının bilgisayarında oturum açma sayısı",
+    "n_usb": "Günlük USB bağlantı sayısı",
+    "usb_mean_usb_dur": "USB bağlantı süresinin gün içi ortalaması",
+    "usb_n-pc0": "Kendi bilgisayarında USB bağlantı sayısı",
+    "usb_n-pc1": "Paylaşımlı bilgisayarda USB bağlantı sayısı",
+    "usb_n-pc2": "Başka bir kullanıcının bilgisayarında USB bağlantı sayısı",
+    "n_workhourusb": "Mesai içi USB bağlantı sayısı",
+    "n_afterhourusb": "Mesai dışı USB bağlantı sayısı",
+    "n_file": "Günlük dosya olayı sayısı",
+    "file_mean_file_len": "Dosya içeriği uzunluğunun gün içi ortalaması",
+    "file_mean_file_depth": "Dosya yolu derinliğinin gün içi ortalaması",
+    "file_mean_file_nwords": "Dosya içeriği kelime sayısının gün içi ortalaması",
+    "file_n-disk0": "Yolu C: ya da R: ile başlamayan dosya olayı sayısı",
+    "file_n-disk1": "Yolu C: ile başlayan dosya olayı sayısı",
+    "file_n_otherf": "Diğer türdeki dosya sayısı",
+    "file_n_compf": "Sıkıştırılmış dosya sayısı",
+    "file_n_phof": "Görüntü dosyası sayısı",
+    "file_n_docf": "Belge dosyası sayısı",
+    "file_n_txtf": "Metin dosyası sayısı",
+    "file_n_exef": "Yürütülebilir dosya sayısı",
+    "n_email": "Günlük e-posta sayısı",
+    "email_mean_n_des": "E-posta başına alıcı sayısının gün içi ortalaması",
+    "email_mean_n_atts": "E-posta başına ek sayısının gün içi ortalaması",
+    "email_n-Xemail1": "Kurum dışı alıcı içeren e-posta sayısı",
+    "email_mean_n_exdes": "Kurum dışı alıcı sayısının gün içi ortalaması",
+    "email_mean_n_bccdes": "Gizli alıcı (BCC) sayısının gün içi ortalaması",
+    "email_n-exbccmail1": "Kurum dışı gizli alıcı içeren e-posta sayısı",
+    "email_mean_email_size": "E-posta boyutunun gün içi ortalaması",
+    "email_mean_email_text_slen": "E-posta metni uzunluğunun gün içi ortalaması",
+    "email_mean_email_text_nwords": "E-posta metni kelime sayısının gün içi ortalaması",
+    "email_n-pc0": "Kendi bilgisayarındaki e-posta olayı sayısı",
+    "email_n-pc1": "Paylaşımlı bilgisayardaki e-posta olayı sayısı",
+    "email_n-pc2": "Başka bir kullanıcının bilgisayarındaki e-posta olayı sayısı",
+    "n_http": "Günlük web ziyareti sayısı",
+    "http_mean_url_len": "Adres uzunluğunun gün içi ortalaması",
+    "http_mean_url_depth": "Adres yolu derinliğinin gün içi ortalaması",
+    "http_mean_http_c_len": "Sayfa içeriği uzunluğunun gün içi ortalaması",
+    "http_mean_http_c_nwords": "Sayfa içeriği kelime sayısının gün içi ortalaması",
+    "http_n_socnetf": "Sosyal ağ sitesi ziyareti sayısı",
+    "http_n_cloudf": "Bulut depolama sitesi ziyareti sayısı",
+    "http_n_jobf": "İş arama sitesi ziyareti sayısı",
+}
+
+# A cell counts as zero below this magnitude. The percentile transform leaves
+# values that should be zero as float residue around 7.1e-15 in every column, so
+# an exact `== 0` test undercounts zeros everywhere, not only in the four
+# constant features.
+ZERO_TOLERANCE = 1e-9
 
 
 def feature_source(name):
@@ -88,7 +153,10 @@ def feature_source(name):
 
 
 def feature_description(name):
-    """A one-line meaning, derived from the naming convention."""
+    """A one-line meaning: written out for the thesis features, derived from the
+    naming convention for any other column."""
+    if name in FEATURE_DESCRIPTIONS:
+        return FEATURE_DESCRIPTIONS[name]
     if name == "isweekday":
         return "Gün hafta içi mi"
     if name == "isweekend":
@@ -144,7 +212,7 @@ def describe_features(df, features):
             "Maks": float(column.max()),
             "Ortalama": round(float(column.mean()), 4),
             "Std": round(std, 4),
-            "Sıfır_oranı_%": round(100 * float((column == 0).mean()), 1),
+            "Sıfır_oranı_%": round(100 * float((column.abs() < ZERO_TOLERANCE).mean()), 1),
             "Farklı_değer": int(column.nunique()),
             "Sabit": bool(std < scaling.constant_feature_tolerance()),
         })
@@ -167,7 +235,7 @@ def write_markdown(table, path, total_columns):
         "# Öznitelik Tablosu",
         "",
         f"Kaynak: `{generator}`, {len(table)} öznitelik "
-        f"(çıkarım script'inin ürettiği {total_columns} sütun arasından seçilmiş).",
+        f"(çıkarım betiğinin ürettiği {total_columns} sütun arasından seçilmiş).",
         "",
         "| # | Öznitelik | Kaynak | Açıklama | Ortalama | Std | Sıfır % |",
         "|---|---|---|---|---|---|---|",
@@ -227,7 +295,7 @@ def main():
     features = list(config.get("data", "selected_features"))
 
     # The header alone tells us how many columns the extraction produces, which
-    # is the denominator J5 asks about. Reading it costs nothing.
+    # is the denominator for "why these 50". Reading it costs nothing.
     total_columns = len(pd.read_csv(data_path, nrows=0).columns)
 
     # Only the selected columns: the file is 1.6 GB and 510 columns wide.

@@ -237,9 +237,10 @@ class LSTMAutoencoder(nn.Module):
         else:
             self.bottleneck = nn.Identity()
 
-        # Unidirectional: reconstruction runs forward in time, and a decoder
-        # allowed to look ahead would be reading the answer. Not configurable for
-        # that reason, unlike the encoder's direction.
+        # Unidirectional, and not configurable, unlike the encoder's direction.
+        # This is a choice rather than a leak guard: the decoder's input is the
+        # latent repeated at every timestep (see forward), so it never reads the
+        # raw days in either direction. A bidirectional decoder was not tried.
         self.decoder = nn.LSTM(arch.hidden_dim, arch.hidden_dim,
                                num_layers=arch.decoder_layers, batch_first=True,
                                dropout=arch.lstm_dropout(arch.decoder_layers))
@@ -257,9 +258,10 @@ class LSTMAutoencoder(nn.Module):
         _, (hidden, _) = self.encoder(x)
 
         if self.arch.encoder_bidirectional:
-            # The last two entries are the final layer's backward and forward
-            # states, which concatenate into the hidden_dim-wide summary of the
-            # whole window. The earlier layers' states are intermediate and are
+            # The last two entries are the final layer's forward and backward
+            # states, in that order: torch stacks h_n as [L0 fwd, L0 bwd, L1 fwd,
+            # L1 bwd], so hidden[-2] is forward. They concatenate into the
+            # hidden_dim-wide summary of the whole window. The earlier layers' states are intermediate and are
             # not what the bottleneck should compress.
             latent = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)
         else:

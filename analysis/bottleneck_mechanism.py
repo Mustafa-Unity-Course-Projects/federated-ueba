@@ -46,6 +46,10 @@ KOLLAR = ("baseline", "no-bottleneck")
 
 def checkpoint_yukle(kol, seed, tur, arch, girdi_boyutu):
     """Kaydedilmiş turun ağırlıklarını mimariye giydirir."""
+    # Kaydedilmis agirliklar, egitildikleri girdi donusumuyle puanlanmali.
+    scaling.assert_transform_matches_run(os.path.join(
+        "federated_evaluation_reports", f"{kol}__seed{seed}",
+        "experiment_summary.json"))
     yol = os.path.join("model_pickle", f"{kol}__seed{seed}",
                        f"parameters_round_{tur}.pkl")
     with open(yol, "rb") as f:
